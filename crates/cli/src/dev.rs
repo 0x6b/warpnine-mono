@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use clap::Subcommand;
 use read_fonts::types::Tag;
 use warpnine_core::{
@@ -294,14 +294,15 @@ fn generate_sample(font_dir: &PathBuf, output: &PathBuf, watch: bool, png: bool)
     let sample_typ = docs_dir.join("sample.typ");
     let subcommand = if watch { "watch" } else { "compile" };
 
-    let status = Command::new("typst")
+    let mut command = Command::new("typst");
+    command
         .arg(subcommand)
         .arg("--ignore-system-fonts")
         .arg("--font-path")
         .arg(font_dir)
         .arg(&sample_typ)
-        .arg(output)
-        .status()?;
+        .arg(output);
+    let status = run_typst(&mut command)?;
 
     if !status.success() {
         bail!("typst {subcommand} failed with exit code: {:?}", status.code());
@@ -315,7 +316,8 @@ fn generate_sample(font_dir: &PathBuf, output: &PathBuf, watch: bool, png: bool)
         // Page 1 → sample.png (Latin overview), page 2 → sample-jp.png (Japanese specimen).
         for (page, name) in [("1", "sample.png"), ("2", "sample-jp.png")] {
             let png_output = docs_dir.join(name);
-            let status = Command::new("typst")
+            let mut command = Command::new("typst");
+            command
                 .arg("compile")
                 .arg("--ignore-system-fonts")
                 .arg("--font-path")
@@ -325,8 +327,8 @@ fn generate_sample(font_dir: &PathBuf, output: &PathBuf, watch: bool, png: bool)
                 .arg("--ppi")
                 .arg("288")
                 .arg(&sample_typ)
-                .arg(&png_output)
-                .status()?;
+                .arg(&png_output);
+            let status = run_typst(&mut command)?;
 
             if !status.success() {
                 bail!("typst compile (PNG) failed with exit code: {:?}", status.code());
@@ -336,4 +338,23 @@ fn generate_sample(font_dir: &PathBuf, output: &PathBuf, watch: bool, png: bool)
     }
 
     Ok(())
+}
+
+fn run_typst(command: &mut std::process::Command) -> Result<std::process::ExitStatus> {
+    command.status().with_context(
+        || "failed to run `typst`; install Typst and ensure the `typst` executable is on PATH",
+    )
+}
+
+#[cfg(test)]
+mod sample_tests {
+    use super::*;
+
+    #[test]
+    fn missing_typst_command_has_actionable_error() {
+        let mut command = std::process::Command::new("warpnine-command-that-does-not-exist");
+        let error = run_typst(&mut command).unwrap_err();
+        assert!(error.to_string().contains("install Typst"));
+        assert!(error.to_string().contains("PATH"));
+    }
 }

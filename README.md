@@ -42,6 +42,7 @@ Releases are automatically built and published via GitHub Actions when a tag mat
 ## Requirements
 
 - Rust 1.85+ (2024 edition)
+- [Typst](https://typst.app/) on `PATH` when using `dev generate-sample` (`brew install typst` on macOS)
 
 ## Build
 
