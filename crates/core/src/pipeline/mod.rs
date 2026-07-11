@@ -14,7 +14,8 @@ use anyhow::Result;
 pub use clean::clean;
 pub use download::download;
 pub use steps::{
-    CONDENSED_ONLY_STEPS, FINAL_STEPS, MONO_STEPS, PipelineStep, SANS_ONLY_STEPS, SANS_STEPS,
+    CONDENSED_ONLY_STEPS, FINAL_STEPS, MONO_FINAL_STEPS, MONO_STEPS, PipelineStep, SANS_ONLY_STEPS,
+    SANS_STEPS,
 };
 pub use vf::{
     build_warpnine_condensed_vf, build_warpnine_mono_vf, build_warpnine_sans_vf,
@@ -155,10 +156,10 @@ pub fn build_mono(build_dir: &Path, dist_dir: &Path, version: Option<String>) ->
     println!("Warpnine Mono Build Pipeline (Rust)");
     println!("═══════════════════════════════════════════════════════════════════════════════");
 
-    let total = MONO_STEPS.len() + FINAL_STEPS.len();
+    let total = MONO_STEPS.len() + MONO_FINAL_STEPS.len();
 
     run_steps(MONO_STEPS, &ctx, 0, total)?;
-    run_steps(FINAL_STEPS, &ctx, MONO_STEPS.len(), total)?;
+    run_steps(MONO_FINAL_STEPS, &ctx, MONO_STEPS.len(), total)?;
 
     println!("\n═══════════════════════════════════════════════════════════════════════════════");
     println!("✨ Mono build complete in {:.2}s", start.elapsed().as_secs_f64());

@@ -70,6 +70,9 @@ pub const FINAL_STEPS: &[PipelineStep] = &[
     ("generate-woff2-condensed", step_generate_woff2_condensed),
 ];
 
+pub const MONO_FINAL_STEPS: &[PipelineStep] =
+    &[("set-version-mono", step_set_version_mono), ("generate-woff2", step_generate_woff2)];
+
 pub const SANS_ONLY_STEPS: &[PipelineStep] = &[
     ("download", step_download),
     ("create-sans", step_create_sans),
@@ -77,7 +80,7 @@ pub const SANS_ONLY_STEPS: &[PipelineStep] = &[
     ("freeze-sans", step_freeze_sans),
     ("build-sans-vf", step_build_sans_vf),
     ("set-names-sans-vf", step_set_names_sans_vf),
-    ("set-version", step_set_version),
+    ("set-version-sans", step_set_version_sans),
     ("generate-woff2-sans", step_generate_woff2_sans),
 ];
 
@@ -88,7 +91,7 @@ pub const CONDENSED_ONLY_STEPS: &[PipelineStep] = &[
     ("freeze-condensed", step_freeze_condensed),
     ("build-condensed-vf", step_build_condensed_vf),
     ("set-names-condensed-vf", step_set_names_condensed_vf),
-    ("set-version", step_set_version),
+    ("set-version-condensed", step_set_version_condensed),
     ("generate-woff2-condensed", step_generate_woff2_condensed),
 ];
 
@@ -494,7 +497,23 @@ fn step_generate_woff2_condensed(ctx: &PipelineContext) -> Result<()> {
 }
 
 fn step_set_version(ctx: &PipelineContext) -> Result<()> {
-    let fonts = ctx.dist_fonts("*.ttf")?;
+    set_version_matching(ctx, "*.ttf")
+}
+
+fn step_set_version_mono(ctx: &PipelineContext) -> Result<()> {
+    set_version_matching(ctx, "WarpnineMono-*.ttf")
+}
+
+fn step_set_version_sans(ctx: &PipelineContext) -> Result<()> {
+    set_version_matching(ctx, "WarpnineSans-*.ttf")
+}
+
+fn step_set_version_condensed(ctx: &PipelineContext) -> Result<()> {
+    set_version_matching(ctx, "WarpnineSansCondensed-*.ttf")
+}
+
+fn set_version_matching(ctx: &PipelineContext, pattern: &str) -> Result<()> {
+    let fonts = ctx.dist_fonts(pattern)?;
     println!("  Setting version on {} fonts...", fonts.len());
 
     let results: Vec<_> = fonts
@@ -559,12 +578,16 @@ mod tests {
                 < position(FINAL_STEPS, "generate-woff2-condensed")
         );
         assert!(
-            position(SANS_ONLY_STEPS, "set-version")
+            position(SANS_ONLY_STEPS, "set-version-sans")
                 < position(SANS_ONLY_STEPS, "generate-woff2-sans")
         );
         assert!(
-            position(CONDENSED_ONLY_STEPS, "set-version")
+            position(CONDENSED_ONLY_STEPS, "set-version-condensed")
                 < position(CONDENSED_ONLY_STEPS, "generate-woff2-condensed")
+        );
+        assert!(
+            position(MONO_FINAL_STEPS, "set-version-mono")
+                < position(MONO_FINAL_STEPS, "generate-woff2")
         );
     }
 }
