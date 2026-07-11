@@ -42,6 +42,7 @@ Releases are automatically built and published via GitHub Actions when a tag mat
 ## Requirements
 
 - Rust 1.85+ (2024 edition)
+- [uv](https://docs.astral.sh/uv/) for Python font-output validation (`uv run pytest tests/ -v`); not required for building fonts
 - [Typst](https://typst.app/) on `PATH` when using `dev generate-sample` (`brew install typst` on macOS)
 
 ## Build
