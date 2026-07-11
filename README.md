@@ -47,8 +47,7 @@ Releases are automatically built and published via GitHub Actions when a tag mat
 
 ```console
 $ cargo build --release
-$ ./target/release/warpnine-fonts build
-$ ./target/release/warpnine-fonts build --version 2025-01-15  # with explicit version date
+$ ./target/release/warpnine-fonts build --version 2026-07-11
 ```
 
 That will generate the following fonts:
@@ -69,9 +68,9 @@ That will generate the following fonts:
 ### Other Commands
 
 ```console
-$ ./target/release/warpnine-fonts build-mono       # build only WarpnineMono
-$ ./target/release/warpnine-fonts build-sans       # build only WarpnineSans
-$ ./target/release/warpnine-fonts build-condensed  # build only WarpnineSansCondensed
+$ ./target/release/warpnine-fonts build-mono --version 2026-07-11       # WarpnineMono only
+$ ./target/release/warpnine-fonts build-sans --version 2026-07-11       # WarpnineSans only
+$ ./target/release/warpnine-fonts build-condensed --version 2026-07-11  # Condensed only
 $ ./target/release/warpnine-fonts download         # download source fonts only
 $ ./target/release/warpnine-fonts clean            # remove build artifacts
 $ ./target/release/warpnine-fonts dev              # hidden commands for development

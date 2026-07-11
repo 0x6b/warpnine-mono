@@ -38,12 +38,9 @@ pub struct PipelineContext {
 }
 
 impl PipelineContext {
-    // `version` is taken by value to keep the owned-`Option<String>` call sites
-    // simple; switching to `Option<&str>` would cascade the same lint up to every
-    // `build_*` entry point.
     #[allow(clippy::needless_pass_by_value)]
-    pub fn new(build_dir: PathBuf, dist_dir: PathBuf, version: Option<String>) -> Result<Self> {
-        let version = FontVersion::parse(version.as_deref())?;
+    pub fn new(build_dir: PathBuf, dist_dir: PathBuf, version: String) -> Result<Self> {
+        let version = FontVersion::parse(Some(&version))?;
         let recursive_vf = build_dir.join(RECURSIVE_VF_FILENAME);
         let noto_vf = build_dir.join(NOTO_CJK_VF_FILENAME);
         let jetbrains_mono = build_dir.join(JETBRAINS_MONO_FILENAME);
@@ -120,7 +117,7 @@ pub fn run_steps(
     Ok(())
 }
 
-pub fn build_all(build_dir: &Path, dist_dir: &Path, version: Option<String>) -> Result<()> {
+pub fn build_all(build_dir: &Path, dist_dir: &Path, version: String) -> Result<()> {
     let ctx = PipelineContext::new(build_dir.to_path_buf(), dist_dir.to_path_buf(), version)?;
     let start = Instant::now();
 
@@ -148,7 +145,7 @@ pub fn build_all(build_dir: &Path, dist_dir: &Path, version: Option<String>) -> 
     Ok(())
 }
 
-pub fn build_mono(build_dir: &Path, dist_dir: &Path, version: Option<String>) -> Result<()> {
+pub fn build_mono(build_dir: &Path, dist_dir: &Path, version: String) -> Result<()> {
     let ctx = PipelineContext::new(build_dir.to_path_buf(), dist_dir.to_path_buf(), version)?;
     let start = Instant::now();
 
@@ -172,7 +169,7 @@ pub fn build_mono(build_dir: &Path, dist_dir: &Path, version: Option<String>) ->
     Ok(())
 }
 
-pub fn build_sans(build_dir: &Path, dist_dir: &Path, version: Option<String>) -> Result<()> {
+pub fn build_sans(build_dir: &Path, dist_dir: &Path, version: String) -> Result<()> {
     let ctx = PipelineContext::new(build_dir.to_path_buf(), dist_dir.to_path_buf(), version)?;
     let start = Instant::now();
 
@@ -195,7 +192,7 @@ pub fn build_sans(build_dir: &Path, dist_dir: &Path, version: Option<String>) ->
     Ok(())
 }
 
-pub fn build_condensed(build_dir: &Path, dist_dir: &Path, version: Option<String>) -> Result<()> {
+pub fn build_condensed(build_dir: &Path, dist_dir: &Path, version: String) -> Result<()> {
     let ctx = PipelineContext::new(build_dir.to_path_buf(), dist_dir.to_path_buf(), version)?;
     let start = Instant::now();
 
