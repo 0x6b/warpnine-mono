@@ -7,6 +7,7 @@ These tests use known expected values as the gold standard.
 Run with: uv run pytest tests/integration/test_font_output_validation.py -v
 """
 
+import os
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -15,7 +16,6 @@ from pathlib import Path
 import pytest
 from fontTools.ttLib import TTFont
 from fontTools.varLib.instancer import instantiateVariableFont
-
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 RUST_CLI = PROJECT_ROOT / "target" / "release" / "warpnine-fonts"
@@ -118,6 +118,33 @@ CONDENSED_SPEC = FontSpec(
 # ============================================================================
 # Test Fixtures
 # ============================================================================
+
+
+def expected_release_files() -> set[str]:
+    files = set()
+    for family, weights in [
+        ("WarpnineMono", MONO_WEIGHTS),
+        ("WarpnineSans", SANS_WEIGHTS),
+        ("WarpnineSansCondensed", SANS_WEIGHTS),
+    ]:
+        for style in weights:
+            files.add(f"{family}-{style}.ttf")
+            italic = "Italic" if style == "Regular" else f"{style}Italic"
+            files.add(f"{family}-{italic}.ttf")
+        files.add(f"{family}-VF.ttf")
+        files.add(f"{family}-VF.woff2")
+    return files
+
+
+@pytest.fixture(scope="session", autouse=True)
+def require_release_manifest_in_strict_mode():
+    """Fail early on missing release artifacts instead of allowing skips."""
+    if os.environ.get("WARPNINE_STRICT_OUTPUTS") != "1":
+        return
+
+    actual = {path.name for path in DIST_DIR.iterdir()} if DIST_DIR.exists() else set()
+    missing = sorted(expected_release_files() - actual)
+    assert not missing, f"Missing release artifacts: {missing}"
 
 
 @pytest.fixture(scope="module")

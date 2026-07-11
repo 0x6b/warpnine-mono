@@ -64,6 +64,8 @@ jobs:
 
       - name: Validate generated fonts
         run: uv run pytest tests/integration/test_font_output_validation.py -v
+        env:
+          WARPNINE_STRICT_OUTPUTS: "1"
 
       - name: Create zip archive
         run: |
