@@ -115,40 +115,6 @@ CONDENSED_SPEC = FontSpec(
     is_monospace=False,
 )
 
-# Expected frozen features
-MONO_FROZEN_FEATURES = {
-    "dlig",
-    "ss01",
-    "ss02",
-    "ss03",
-    "ss04",
-    "ss05",
-    "ss06",
-    "ss07",
-    "ss08",
-    "ss10",
-    "ss11",
-    "ss12",
-    "pnum",
-    "liga",
-}
-
-SANS_FROZEN_FEATURES = {
-    "ss01",
-    "ss02",
-    "ss03",
-    "ss04",
-    "ss05",
-    "ss06",
-    "ss07",
-    "ss08",
-    "ss12",
-    "case",
-    "pnum",
-    "liga",
-}
-
-
 # ============================================================================
 # Test Fixtures
 # ============================================================================

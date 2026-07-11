@@ -11,7 +11,6 @@ impl AsRef<str> for FeatureTag {
 
 /// Features to freeze for WarpnineMono (static and variable).
 pub const MONO_FEATURES: &[FeatureTag] = &[
-    FeatureTag("dlig"), // Discretionary ligatures (programming ligatures)
     FeatureTag("ss01"), // Single-story a
     FeatureTag("ss02"), // Single-story g
     FeatureTag("ss03"), // Simplified f
@@ -24,7 +23,6 @@ pub const MONO_FEATURES: &[FeatureTag] = &[
     FeatureTag("ss11"), // Simplified 1
     FeatureTag("ss12"), // Simplified @
     FeatureTag("pnum"), // Proportional numerals
-    FeatureTag("liga"), // Standard ligatures
 ];
 
 /// Features to freeze for WarpnineSans and WarpnineSansCondensed.
@@ -40,5 +38,19 @@ pub const SANS_FEATURES: &[FeatureTag] = &[
     FeatureTag("ss12"), // Simplified @
     FeatureTag("case"), // Case-sensitive forms
     FeatureTag("pnum"), // Proportional numerals
-    FeatureTag("liga"), // Standard ligatures
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn runtime_ligatures_are_not_in_freeze_lists() {
+        // These multi-glyph features remain in GSUB for application opt-in;
+        // they cannot be represented by a single cmap mapping.
+        for feature in ["dlig", "liga"] {
+            assert!(!MONO_FEATURES.iter().any(|frozen| frozen.0 == feature));
+            assert!(!SANS_FEATURES.iter().any(|frozen| frozen.0 == feature));
+        }
+    }
+}
