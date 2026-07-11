@@ -28,12 +28,17 @@ pub const PROBLEMATIC_CODEPOINTS: &[u32] = &[0xF8FF];
 
 /// Layout features to retain during subsetting.
 const LAYOUT_FEATURES: &[&[u8; 4]] = &[
-    b"aalt", b"ccmp", b"dlig", b"fwid", b"hwid", b"jp78", b"jp83", b"jp90", b"liga", b"locl",
-    b"nlck", b"pwid", b"vert", b"vjmo", b"vrt2", b"halt", b"vhal", b"kern", b"mark", b"mkmk",
-    b"calt", b"rvrn", b"ss01", b"ss02", b"ss03", b"ss04", b"ss05", b"ss06", b"ss07", b"ss08",
-    b"ss09", b"ss10", b"ss11", b"ss12", b"ss20", b"dnom", b"numr", b"frac", b"ordn", b"sups",
-    b"subs", b"sinf", b"case", b"zero",
+    b"aalt", b"afrc", b"ccmp", b"dlig", b"fwid", b"hwid", b"jp78", b"jp83", b"jp90", b"liga",
+    b"locl", b"nlck", b"pnum", b"pwid", b"titl", b"vert", b"vjmo", b"vrt2", b"halt", b"vhal",
+    b"kern", b"mark", b"mkmk", b"calt", b"rvrn", b"ss01", b"ss02", b"ss03", b"ss04", b"ss05",
+    b"ss06", b"ss07", b"ss08", b"ss09", b"ss10", b"ss11", b"ss12", b"ss20", b"dnom", b"numr",
+    b"frac", b"ordn", b"sups", b"subs", b"sinf", b"case", b"zero",
 ];
+
+/// Standard OpenType name IDs to retain. HarfBuzz's defaults omit
+/// typographic family/subfamily IDs 16/17, which breaks family grouping in
+/// applications that prefer typographic names.
+const STANDARD_NAME_IDS: std::ops::RangeInclusive<u32> = 0..=25;
 
 /// Converts TTF font data to WOFF2 format.
 ///
@@ -76,12 +81,23 @@ pub fn subset_for_woff2(data: &[u8]) -> Result<Vec<u8>> {
         bail!("No valid codepoints found in font");
     }
 
+    if !codepoints.iter().any(|cp| PROBLEMATIC_CODEPOINTS.contains(cp)) {
+        return Ok(data.to_vec());
+    }
+
     let filtered: Vec<u32> = codepoints
         .into_iter()
         .filter(|cp| !PROBLEMATIC_CODEPOINTS.contains(cp))
         .collect();
 
     let mut input = SubsetInput::new()?;
+
+    {
+        let mut name_ids = input.name_id_set();
+        for name_id in STANDARD_NAME_IDS {
+            name_ids.insert(name_id);
+        }
+    }
 
     {
         let mut feature_set = input.layout_feature_tag_set();
@@ -191,9 +207,24 @@ fn extract_from_format4(f4: &Cmap4) -> Vec<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use read_fonts::TableProvider;
 
     #[test]
     fn test_problematic_codepoints() {
         assert!(PROBLEMATIC_CODEPOINTS.contains(&0xF8FF));
+    }
+
+    #[test]
+    fn converts_real_variable_font_and_preserves_variations() {
+        let input = font_test_data::VAZIRMATN_VAR;
+        let subset = subset_for_woff2(input).unwrap();
+        let subset_font = FontRef::new(&subset).unwrap();
+
+        assert!(subset_font.cmap().is_ok());
+        assert!(subset_font.fvar().is_ok());
+        assert!(subset_font.gvar().is_ok());
+
+        let woff2 = convert_to_woff2(input).unwrap();
+        assert_eq!(&woff2[..4], b"wOF2");
     }
 }

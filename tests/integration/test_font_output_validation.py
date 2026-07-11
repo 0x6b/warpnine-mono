@@ -7,6 +7,7 @@ These tests use known expected values as the gold standard.
 Run with: uv run pytest tests/integration/test_font_output_validation.py -v
 """
 
+import os
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -15,7 +16,6 @@ from pathlib import Path
 import pytest
 from fontTools.ttLib import TTFont
 from fontTools.varLib.instancer import instantiateVariableFont
-
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 RUST_CLI = PROJECT_ROOT / "target" / "release" / "warpnine-fonts"
@@ -115,43 +115,36 @@ CONDENSED_SPEC = FontSpec(
     is_monospace=False,
 )
 
-# Expected frozen features
-MONO_FROZEN_FEATURES = {
-    "dlig",
-    "ss01",
-    "ss02",
-    "ss03",
-    "ss04",
-    "ss05",
-    "ss06",
-    "ss07",
-    "ss08",
-    "ss10",
-    "ss11",
-    "ss12",
-    "pnum",
-    "liga",
-}
-
-SANS_FROZEN_FEATURES = {
-    "ss01",
-    "ss02",
-    "ss03",
-    "ss04",
-    "ss05",
-    "ss06",
-    "ss07",
-    "ss08",
-    "ss12",
-    "case",
-    "pnum",
-    "liga",
-}
-
-
 # ============================================================================
 # Test Fixtures
 # ============================================================================
+
+
+def expected_release_files() -> set[str]:
+    files = set()
+    for family, weights in [
+        ("WarpnineMono", MONO_WEIGHTS),
+        ("WarpnineSans", SANS_WEIGHTS),
+        ("WarpnineSansCondensed", SANS_WEIGHTS),
+    ]:
+        for style in weights:
+            files.add(f"{family}-{style}.ttf")
+            italic = "Italic" if style == "Regular" else f"{style}Italic"
+            files.add(f"{family}-{italic}.ttf")
+        files.add(f"{family}-VF.ttf")
+        files.add(f"{family}-VF.woff2")
+    return files
+
+
+@pytest.fixture(scope="session", autouse=True)
+def require_release_manifest_in_strict_mode():
+    """Fail early on missing release artifacts instead of allowing skips."""
+    if os.environ.get("WARPNINE_STRICT_OUTPUTS") != "1":
+        return
+
+    actual = {path.name for path in DIST_DIR.iterdir()} if DIST_DIR.exists() else set()
+    missing = sorted(expected_release_files() - actual)
+    assert not missing, f"Missing release artifacts: {missing}"
 
 
 @pytest.fixture(scope="module")
@@ -249,7 +242,14 @@ def validate_font_naming(
     font = TTFont(font_path)
 
     # Expected values (matching FontNaming class logic)
-    expected_full_name = f"{family} {style}"
+    display_style = (
+        f"{style.removesuffix('Italic')} Italic"
+        if style.endswith("Italic") and style != "Italic"
+        else style
+    )
+    expected_full_name = (
+        family if display_style == "Regular" else f"{family} {display_style}"
+    )
     expected_ps_name = f"{postscript_family}-{style.replace(' ', '')}"
 
     # Name ID 4: Full name
@@ -282,9 +282,10 @@ def validate_font_naming(
 
     # Name ID 17: Typographic Subfamily
     typo_subfamily = get_name_entry(font, 17)
-    if typo_subfamily and typo_subfamily != style:
+    if typo_subfamily and typo_subfamily != display_style:
         failures.append(
-            f"Name ID 17 (Typographic Subfamily): expected '{style}', got '{typo_subfamily}'"
+            "Name ID 17 (Typographic Subfamily): "
+            f"expected '{display_style}', got '{typo_subfamily}'"
         )
 
     font.close()
@@ -613,6 +614,25 @@ class TestWarpnineMonoVF:
         assert not has_varstore, (
             "GDEF should not have VarStore (incompatible axis count)"
         )
+
+    def test_documented_unicode_coverage(self):
+        """Keep README coverage figures tied to the generated Mono VF."""
+        font_path = DIST_DIR / "WarpnineMono-VF.ttf"
+        if not font_path.exists():
+            pytest.skip("VF not built")
+
+        font = TTFont(font_path)
+        codepoints = set(font.getBestCmap())
+        font.close()
+
+        def count(start, end):
+            return sum(codepoint in codepoints for codepoint in range(start, end + 1))
+
+        assert len(codepoints) == 32_042
+        assert count(0x3040, 0x309F) == 93
+        assert count(0x30A0, 0x30FF) == 96
+        assert count(0x4E00, 0x9FFF) == 20_976
+        assert count(0x3400, 0x4DBF) == 6_582
 
     def test_vf_gsub_no_feature_variations(self):
         """Test VF GSUB table has no FeatureVariations (incompatible axis indices removed)."""
@@ -1282,6 +1302,52 @@ class TestFeatureFreezing:
         assert glyph == "zero.sans", (
             f"Expected Condensed '0' to use plain zero (zero.sans), got '{glyph}'"
         )
+
+
+class TestWoff2Outputs:
+    """Verify published WOFF2 files are faithful to their final TTFs."""
+
+    @pytest.mark.parametrize(
+        "stem",
+        ["WarpnineMono-VF", "WarpnineSans-VF", "WarpnineSansCondensed-VF"],
+    )
+    def test_woff2_matches_ttf_metadata_and_features(self, stem):
+        ttf_path = DIST_DIR / f"{stem}.ttf"
+        woff2_path = DIST_DIR / f"{stem}.woff2"
+        assert ttf_path.exists(), f"Missing expected TTF: {ttf_path.name}"
+        assert woff2_path.exists(), f"Missing expected WOFF2: {woff2_path.name}"
+
+        ttf = TTFont(ttf_path)
+        woff2 = TTFont(woff2_path)
+
+        for name_id in (1, 2, 3, 4, 5, 6, 16, 17):
+            assert get_name_entry(woff2, name_id) == get_name_entry(ttf, name_id), (
+                f"{stem}: WOFF2 name ID {name_id} differs from TTF"
+            )
+        assert woff2["head"].fontRevision == ttf["head"].fontRevision
+
+        ttf_cmap = set(ttf.getBestCmap())
+        woff2_cmap = set(woff2.getBestCmap())
+        assert woff2_cmap == ttf_cmap - {0xF8FF}
+
+        ttf_axes = {
+            axis.axisTag: (axis.minValue, axis.defaultValue, axis.maxValue)
+            for axis in ttf["fvar"].axes
+        }
+        woff2_axes = {
+            axis.axisTag: (axis.minValue, axis.defaultValue, axis.maxValue)
+            for axis in woff2["fvar"].axes
+        }
+        assert woff2_axes == ttf_axes
+        expected_features = get_gsub_features(ttf)
+        if 0xF8FF in ttf_cmap:
+            # rvrn has already been frozen into the cmap and HarfBuzz removes
+            # its now-unreachable lookup while excluding U+F8FF.
+            expected_features -= {"rvrn"}
+        assert get_gsub_features(woff2) == expected_features
+
+        ttf.close()
+        woff2.close()
 
 
 # ============================================================================

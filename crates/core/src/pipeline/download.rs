@@ -1,5 +1,5 @@
 use std::{
-    fs::{create_dir_all, write},
+    fs::{create_dir_all, remove_file, rename, write},
     io::{Cursor, Read},
     iter::once,
     path::Path,
@@ -9,18 +9,22 @@ use std::{
 use anyhow::{Context, Result, bail};
 use rayon::prelude::*;
 use reqwest::blocking::get;
+use sha2::{Digest, Sha256};
 use zip::ZipArchive;
 
 use crate::config::{
-    JETBRAINS_MONO_FILENAME, JETBRAINS_MONO_LICENSE_URL, JETBRAINS_MONO_ZIP_PATH,
-    JETBRAINS_MONO_ZIP_URL, NOTO_CJK_LICENSE_URL, NOTO_CJK_VF_FILENAME, NOTO_CJK_VF_URL,
-    RECURSIVE_LICENSE_URL, RECURSIVE_VF_FILENAME, RECURSIVE_ZIP_PATH, RECURSIVE_ZIP_URL,
+    JETBRAINS_MONO_FILENAME, JETBRAINS_MONO_LICENSE_SHA256, JETBRAINS_MONO_LICENSE_URL,
+    JETBRAINS_MONO_SHA256, JETBRAINS_MONO_ZIP_PATH, JETBRAINS_MONO_ZIP_URL,
+    NOTO_CJK_LICENSE_SHA256, NOTO_CJK_LICENSE_URL, NOTO_CJK_VF_FILENAME, NOTO_CJK_VF_SHA256,
+    NOTO_CJK_VF_URL, RECURSIVE_LICENSE_SHA256, RECURSIVE_LICENSE_URL, RECURSIVE_VF_FILENAME,
+    RECURSIVE_VF_SHA256, RECURSIVE_ZIP_PATH, RECURSIVE_ZIP_URL,
 };
 
 struct DownloadItem {
     url: &'static str,
     output_name: &'static str,
     description: &'static str,
+    sha256: &'static str,
 }
 
 const DOWNLOADS: &[DownloadItem] = &[
@@ -28,21 +32,25 @@ const DOWNLOADS: &[DownloadItem] = &[
         url: NOTO_CJK_VF_URL,
         output_name: NOTO_CJK_VF_FILENAME,
         description: "Noto Sans Mono CJK JP (Variable)",
+        sha256: NOTO_CJK_VF_SHA256,
     },
     DownloadItem {
         url: NOTO_CJK_LICENSE_URL,
         output_name: "LICENSE-NotoSansCJK.txt",
         description: "Noto CJK License",
+        sha256: NOTO_CJK_LICENSE_SHA256,
     },
     DownloadItem {
         url: RECURSIVE_LICENSE_URL,
         output_name: "LICENSE-Recursive.txt",
         description: "Recursive License (OFL)",
+        sha256: RECURSIVE_LICENSE_SHA256,
     },
     DownloadItem {
         url: JETBRAINS_MONO_LICENSE_URL,
         output_name: "LICENSE-JetBrainsMono.txt",
         description: "JetBrains Mono License (OFL)",
+        sha256: JETBRAINS_MONO_LICENSE_SHA256,
     },
 ];
 
@@ -58,7 +66,7 @@ fn download_file(item: &DownloadItem, output_dir: &Path) -> Result<()> {
     }
 
     let bytes = response.bytes()?;
-    write(&target, &bytes)?;
+    write_verified(&target, &bytes, item.sha256)?;
 
     let size_mb = bytes.len() as f64 / 1024.0 / 1024.0;
     println!("  Downloaded ({size_mb:.2} MB)");
@@ -87,7 +95,7 @@ fn download_recursive_vf(output_dir: &Path) -> Result<()> {
 
     let mut buffer = Vec::new();
     file.read_to_end(&mut buffer)?;
-    write(&target, &buffer)?;
+    write_verified(&target, &buffer, RECURSIVE_VF_SHA256)?;
 
     let size_mb = buffer.len() as f64 / 1024.0 / 1024.0;
     println!("  Downloaded ({size_mb:.2} MB)");
@@ -116,10 +124,34 @@ fn download_jetbrains_mono(output_dir: &Path) -> Result<()> {
 
     let mut buffer = Vec::new();
     file.read_to_end(&mut buffer)?;
-    write(&target, &buffer)?;
+    write_verified(&target, &buffer, JETBRAINS_MONO_SHA256)?;
 
     let size_mb = buffer.len() as f64 / 1024.0 / 1024.0;
     println!("  Downloaded ({size_mb:.2} MB)");
+    Ok(())
+}
+
+fn write_verified(target: &Path, bytes: &[u8], expected_sha256: &str) -> Result<()> {
+    let actual = format!("{:x}", Sha256::digest(bytes));
+    if !actual.eq_ignore_ascii_case(expected_sha256) {
+        bail!(
+            "SHA-256 mismatch for {}: expected {expected_sha256}, got {actual}",
+            target.display()
+        );
+    }
+
+    let filename = target
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("download");
+    let temporary = target.with_file_name(format!(".{filename}.{}.tmp", std::process::id()));
+    write(&temporary, bytes).with_context(|| format!("Failed to write {}", temporary.display()))?;
+    if let Err(error) = rename(&temporary, target) {
+        let _ = remove_file(&temporary);
+        return Err(error).with_context(|| {
+            format!("Failed to rename {} to {}", temporary.display(), target.display())
+        });
+    }
     Ok(())
 }
 
@@ -175,4 +207,30 @@ pub fn download(build_dir: &Path) -> Result<()> {
 
     println!("All files ready in {}/", build_dir.display());
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs::{create_dir_all, read, remove_dir_all};
+
+    #[test]
+    fn verified_write_is_atomic_and_rejects_mismatches() {
+        let dir =
+            std::env::temp_dir().join(format!("warpnine-download-test-{}", std::process::id()));
+        create_dir_all(&dir).unwrap();
+        let target = dir.join("source.ttf");
+        let bytes = b"font data";
+        let digest = format!("{:x}", Sha256::digest(bytes));
+
+        write_verified(&target, bytes, &digest).unwrap();
+        assert_eq!(read(&target).unwrap(), bytes);
+
+        let error = write_verified(&target, b"unexpected", &digest).unwrap_err();
+        assert!(error.to_string().contains("SHA-256 mismatch"));
+        assert_eq!(read(&target).unwrap(), bytes);
+        assert!(!dir.join(format!(".source.ttf.{}.tmp", std::process::id())).exists());
+
+        remove_dir_all(dir).unwrap();
+    }
 }

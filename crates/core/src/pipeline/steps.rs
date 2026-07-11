@@ -50,7 +50,6 @@ pub const MONO_STEPS: &[PipelineStep] = &[
     ("restore-frozen", step_restore_frozen),
     ("set-names-vf", step_set_names_vf),
     ("set-monospace", step_set_monospace),
-    ("generate-woff2", step_generate_woff2),
 ];
 
 pub const SANS_STEPS: &[PipelineStep] = &[
@@ -62,11 +61,17 @@ pub const SANS_STEPS: &[PipelineStep] = &[
     ("build-condensed-vf", step_build_condensed_vf),
     ("set-names-sans-vf", step_set_names_sans_vf),
     ("set-names-condensed-vf", step_set_names_condensed_vf),
+];
+
+pub const FINAL_STEPS: &[PipelineStep] = &[
+    ("set-version", step_set_version),
+    ("generate-woff2", step_generate_woff2),
     ("generate-woff2-sans", step_generate_woff2_sans),
     ("generate-woff2-condensed", step_generate_woff2_condensed),
 ];
 
-pub const FINAL_STEPS: &[PipelineStep] = &[("set-version", step_set_version)];
+pub const MONO_FINAL_STEPS: &[PipelineStep] =
+    &[("set-version-mono", step_set_version_mono), ("generate-woff2", step_generate_woff2)];
 
 pub const SANS_ONLY_STEPS: &[PipelineStep] = &[
     ("download", step_download),
@@ -75,8 +80,8 @@ pub const SANS_ONLY_STEPS: &[PipelineStep] = &[
     ("freeze-sans", step_freeze_sans),
     ("build-sans-vf", step_build_sans_vf),
     ("set-names-sans-vf", step_set_names_sans_vf),
+    ("set-version-sans", step_set_version_sans),
     ("generate-woff2-sans", step_generate_woff2_sans),
-    ("set-version", step_set_version),
 ];
 
 pub const CONDENSED_ONLY_STEPS: &[PipelineStep] = &[
@@ -86,8 +91,8 @@ pub const CONDENSED_ONLY_STEPS: &[PipelineStep] = &[
     ("freeze-condensed", step_freeze_condensed),
     ("build-condensed-vf", step_build_condensed_vf),
     ("set-names-condensed-vf", step_set_names_condensed_vf),
+    ("set-version-condensed", step_set_version_condensed),
     ("generate-woff2-condensed", step_generate_woff2_condensed),
-    ("set-version", step_set_version),
 ];
 
 fn step_clean(ctx: &PipelineContext) -> Result<()> {
@@ -492,7 +497,23 @@ fn step_generate_woff2_condensed(ctx: &PipelineContext) -> Result<()> {
 }
 
 fn step_set_version(ctx: &PipelineContext) -> Result<()> {
-    let fonts = ctx.dist_fonts("*.ttf")?;
+    set_version_matching(ctx, "*.ttf")
+}
+
+fn step_set_version_mono(ctx: &PipelineContext) -> Result<()> {
+    set_version_matching(ctx, "WarpnineMono-*.ttf")
+}
+
+fn step_set_version_sans(ctx: &PipelineContext) -> Result<()> {
+    set_version_matching(ctx, "WarpnineSans-*.ttf")
+}
+
+fn step_set_version_condensed(ctx: &PipelineContext) -> Result<()> {
+    set_version_matching(ctx, "WarpnineSansCondensed-*.ttf")
+}
+
+fn set_version_matching(ctx: &PipelineContext, pattern: &str) -> Result<()> {
+    let fonts = ctx.dist_fonts(pattern)?;
     println!("  Setting version on {} fonts...", fonts.len());
 
     let results: Vec<_> = fonts
@@ -536,4 +557,37 @@ fn generate_vf_woff2(vf: &Path) -> Result<()> {
     );
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn position(steps: &[PipelineStep], name: &str) -> usize {
+        steps.iter().position(|(step, _)| *step == name).unwrap()
+    }
+
+    #[test]
+    fn versioning_precedes_every_woff2_conversion() {
+        assert!(position(FINAL_STEPS, "set-version") < position(FINAL_STEPS, "generate-woff2"));
+        assert!(
+            position(FINAL_STEPS, "set-version") < position(FINAL_STEPS, "generate-woff2-sans")
+        );
+        assert!(
+            position(FINAL_STEPS, "set-version")
+                < position(FINAL_STEPS, "generate-woff2-condensed")
+        );
+        assert!(
+            position(SANS_ONLY_STEPS, "set-version-sans")
+                < position(SANS_ONLY_STEPS, "generate-woff2-sans")
+        );
+        assert!(
+            position(CONDENSED_ONLY_STEPS, "set-version-condensed")
+                < position(CONDENSED_ONLY_STEPS, "generate-woff2-condensed")
+        );
+        assert!(
+            position(MONO_FINAL_STEPS, "set-version-mono")
+                < position(MONO_FINAL_STEPS, "generate-woff2")
+        );
+    }
 }

@@ -46,3 +46,16 @@ pub const RECURSIVE_LICENSE_URL: &str =
 /// JetBrains Mono license download URL.
 pub const JETBRAINS_MONO_LICENSE_URL: &str =
     "https://raw.githubusercontent.com/JetBrains/JetBrainsMono/v2.304/OFL.txt";
+
+pub const NOTO_CJK_VF_SHA256: &str =
+    "9a91b2f42ad958fd4295586809f85366f0afa020b85ac70b39916c25bc5cda15";
+pub const RECURSIVE_VF_SHA256: &str =
+    "653221ca467f4732fe6856ac493f6c409e9f56a7674abe36b2364acc89796f7c";
+pub const JETBRAINS_MONO_SHA256: &str =
+    "a0bf60ef0f83c5ed4d7a75d45838548b1f6873372dfac88f71804491898d138f";
+pub const NOTO_CJK_LICENSE_SHA256: &str =
+    "6a73f9541c2de74158c0e7cf6b0a58ef774f5a780bf191f2d7ec9cc53efe2bf2";
+pub const RECURSIVE_LICENSE_SHA256: &str =
+    "f9f539cf7549bd417159dbdb9c400943a5b60a7366c2c6fbde9f095173d82479";
+pub const JETBRAINS_MONO_LICENSE_SHA256: &str =
+    "30f0c136e3c88e422d0791acd97238870f9054a9729bc34cf2ff0d4ed8cac4ad";

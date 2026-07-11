@@ -273,9 +273,16 @@ impl<'a> FontEditor<'a> {
                     .collect();
                 mappings.sort_by_key(|&(cp, _)| cp);
 
+                let platform_id = PlatformId::new(record.platform_id() as u16);
+                let encoding_id = match record.platform_id() as u16 {
+                    0 => 4,  // Unicode full repertoire
+                    3 => 10, // Windows Unicode full repertoire
+                    _ => record.encoding_id(),
+                };
+
                 EncodingRecord::new(
-                    PlatformId::new(record.platform_id() as u16),
-                    record.encoding_id(),
+                    platform_id,
+                    encoding_id,
                     CmapSubtable::format_12(0, build_groups(&mappings)),
                 )
             })

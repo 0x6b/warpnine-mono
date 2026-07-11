@@ -34,7 +34,7 @@ Releases are automatically built and published via GitHub Actions when a tag mat
 - Runtime OpenType Features (require application opt-in):
   - `dlig` (programming ligatures), `liga` (`fi`, `ffi`)
 - Box Drawing: Full-height box drawing characters (U+2500-U+257F) from JetBrains Mono for seamless terminal UI
-- CJK Support: Full Japanese character coverage (99% Kanji, 98% Hiragana/Katakana)
+- CJK Support: 32,042 mapped Unicode codepoints in the Mono VF, including 93 Hiragana, 96 Katakana, 20,976 CJK Unified Ideographs, and 6,582 CJK Extension A ideographs
 - CJK Weight Range: Japanese glyphs interpolate across wght 400-700 (Noto CJK source range); Light=Regular and ExtraBold/Black/ExtraBlack=Bold for CJK shapes
 - Static Fonts: Light through ExtraBlack, both upright and italic
 - Mixed CASL Style: Light/Regular use Linear (traditional), Medium+ use Casual (rounder)
@@ -42,13 +42,14 @@ Releases are automatically built and published via GitHub Actions when a tag mat
 ## Requirements
 
 - Rust 1.85+ (2024 edition)
+- [uv](https://docs.astral.sh/uv/) for Python font-output validation (`uv run pytest tests/ -v`); not required for building fonts
+- [Typst](https://typst.app/) on `PATH` when using `dev generate-sample` (`brew install typst` on macOS)
 
 ## Build
 
 ```console
 $ cargo build --release
-$ ./target/release/warpnine-fonts build
-$ ./target/release/warpnine-fonts build --version 2025-01-15  # with explicit version date
+$ ./target/release/warpnine-fonts build --version 2026-07-11
 ```
 
 That will generate the following fonts:
@@ -69,9 +70,9 @@ That will generate the following fonts:
 ### Other Commands
 
 ```console
-$ ./target/release/warpnine-fonts build-mono       # build only WarpnineMono
-$ ./target/release/warpnine-fonts build-sans       # build only WarpnineSans
-$ ./target/release/warpnine-fonts build-condensed  # build only WarpnineSansCondensed
+$ ./target/release/warpnine-fonts build-mono --version 2026-07-11       # WarpnineMono only
+$ ./target/release/warpnine-fonts build-sans --version 2026-07-11       # WarpnineSans only
+$ ./target/release/warpnine-fonts build-condensed --version 2026-07-11  # Condensed only
 $ ./target/release/warpnine-fonts download         # download source fonts only
 $ ./target/release/warpnine-fonts clean            # remove build artifacts
 $ ./target/release/warpnine-fonts dev              # hidden commands for development

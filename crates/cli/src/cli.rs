@@ -28,7 +28,7 @@ pub struct BuildArgs {
     pub dist_dir: PathBuf,
     /// Version string (YYYY-MM-DD or YYYY-MM-DD.N format)
     #[arg(short, long)]
-    pub version: Option<String>,
+    pub version: String,
 }
 
 #[derive(Subcommand)]
@@ -89,5 +89,23 @@ impl Commands {
             Commands::Clean { build_dir, dist_dir } => clean(&build_dir, &dist_dir),
             Commands::Dev(dev) => dev.run(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::error::ErrorKind;
+
+    #[test]
+    fn build_requires_explicit_version() {
+        let error = match Cli::try_parse_from(["warpnine-fonts", "build"]) {
+            Ok(_) => panic!("build without --version should fail"),
+            Err(error) => error,
+        };
+        assert_eq!(error.kind(), ErrorKind::MissingRequiredArgument);
+        assert!(
+            Cli::try_parse_from(["warpnine-fonts", "build", "--version", "2026-07-11",]).is_ok()
+        );
     }
 }

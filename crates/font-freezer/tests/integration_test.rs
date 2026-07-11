@@ -99,6 +99,22 @@ fn test_freeze_pnum_opensans() {
 }
 
 #[test]
+fn test_freeze_normalizes_format12_encoding_ids() {
+    let font_data = include_bytes!("fixtures/OpenSans-Bold.subset.ttf");
+    let frozen = freeze_features(font_data, ["pnum"]).unwrap();
+    let font = FontRef::new(&frozen).unwrap();
+    let cmap = font.cmap().unwrap();
+
+    for record in cmap.encoding_records() {
+        match record.platform_id() as u16 {
+            0 => assert_eq!(record.encoding_id(), 4),
+            3 => assert_eq!(record.encoding_id(), 10),
+            _ => {}
+        }
+    }
+}
+
+#[test]
 fn test_freeze_multiple_features_opensans() {
     let font_data = include_bytes!("fixtures/OpenSans-Bold.subset.ttf");
 

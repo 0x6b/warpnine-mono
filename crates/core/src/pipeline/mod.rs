@@ -14,7 +14,8 @@ use anyhow::Result;
 pub use clean::clean;
 pub use download::download;
 pub use steps::{
-    CONDENSED_ONLY_STEPS, FINAL_STEPS, MONO_STEPS, PipelineStep, SANS_ONLY_STEPS, SANS_STEPS,
+    CONDENSED_ONLY_STEPS, FINAL_STEPS, MONO_FINAL_STEPS, MONO_STEPS, PipelineStep, SANS_ONLY_STEPS,
+    SANS_STEPS,
 };
 pub use vf::{
     build_warpnine_condensed_vf, build_warpnine_mono_vf, build_warpnine_sans_vf,
@@ -37,12 +38,9 @@ pub struct PipelineContext {
 }
 
 impl PipelineContext {
-    // `version` is taken by value to keep the owned-`Option<String>` call sites
-    // simple; switching to `Option<&str>` would cascade the same lint up to every
-    // `build_*` entry point.
     #[allow(clippy::needless_pass_by_value)]
-    pub fn new(build_dir: PathBuf, dist_dir: PathBuf, version: Option<String>) -> Result<Self> {
-        let version = FontVersion::parse(version.as_deref())?;
+    pub fn new(build_dir: PathBuf, dist_dir: PathBuf, version: String) -> Result<Self> {
+        let version = FontVersion::parse(Some(&version))?;
         let recursive_vf = build_dir.join(RECURSIVE_VF_FILENAME);
         let noto_vf = build_dir.join(NOTO_CJK_VF_FILENAME);
         let jetbrains_mono = build_dir.join(JETBRAINS_MONO_FILENAME);
@@ -119,7 +117,7 @@ pub fn run_steps(
     Ok(())
 }
 
-pub fn build_all(build_dir: &Path, dist_dir: &Path, version: Option<String>) -> Result<()> {
+pub fn build_all(build_dir: &Path, dist_dir: &Path, version: String) -> Result<()> {
     let ctx = PipelineContext::new(build_dir.to_path_buf(), dist_dir.to_path_buf(), version)?;
     let start = Instant::now();
 
@@ -147,7 +145,7 @@ pub fn build_all(build_dir: &Path, dist_dir: &Path, version: Option<String>) -> 
     Ok(())
 }
 
-pub fn build_mono(build_dir: &Path, dist_dir: &Path, version: Option<String>) -> Result<()> {
+pub fn build_mono(build_dir: &Path, dist_dir: &Path, version: String) -> Result<()> {
     let ctx = PipelineContext::new(build_dir.to_path_buf(), dist_dir.to_path_buf(), version)?;
     let start = Instant::now();
 
@@ -155,10 +153,10 @@ pub fn build_mono(build_dir: &Path, dist_dir: &Path, version: Option<String>) ->
     println!("Warpnine Mono Build Pipeline (Rust)");
     println!("═══════════════════════════════════════════════════════════════════════════════");
 
-    let total = MONO_STEPS.len() + FINAL_STEPS.len();
+    let total = MONO_STEPS.len() + MONO_FINAL_STEPS.len();
 
     run_steps(MONO_STEPS, &ctx, 0, total)?;
-    run_steps(FINAL_STEPS, &ctx, MONO_STEPS.len(), total)?;
+    run_steps(MONO_FINAL_STEPS, &ctx, MONO_STEPS.len(), total)?;
 
     println!("\n═══════════════════════════════════════════════════════════════════════════════");
     println!("✨ Mono build complete in {:.2}s", start.elapsed().as_secs_f64());
@@ -171,7 +169,7 @@ pub fn build_mono(build_dir: &Path, dist_dir: &Path, version: Option<String>) ->
     Ok(())
 }
 
-pub fn build_sans(build_dir: &Path, dist_dir: &Path, version: Option<String>) -> Result<()> {
+pub fn build_sans(build_dir: &Path, dist_dir: &Path, version: String) -> Result<()> {
     let ctx = PipelineContext::new(build_dir.to_path_buf(), dist_dir.to_path_buf(), version)?;
     let start = Instant::now();
 
@@ -194,7 +192,7 @@ pub fn build_sans(build_dir: &Path, dist_dir: &Path, version: Option<String>) ->
     Ok(())
 }
 
-pub fn build_condensed(build_dir: &Path, dist_dir: &Path, version: Option<String>) -> Result<()> {
+pub fn build_condensed(build_dir: &Path, dist_dir: &Path, version: String) -> Result<()> {
     let ctx = PipelineContext::new(build_dir.to_path_buf(), dist_dir.to_path_buf(), version)?;
     let start = Instant::now();
 
