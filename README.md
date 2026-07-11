@@ -34,7 +34,7 @@ Releases are automatically built and published via GitHub Actions when a tag mat
 - Runtime OpenType Features (require application opt-in):
   - `dlig` (programming ligatures), `liga` (`fi`, `ffi`)
 - Box Drawing: Full-height box drawing characters (U+2500-U+257F) from JetBrains Mono for seamless terminal UI
-- CJK Support: Full Japanese character coverage (99% Kanji, 98% Hiragana/Katakana)
+- CJK Support: 32,042 mapped Unicode codepoints in the Mono VF, including 93 Hiragana, 96 Katakana, 20,976 CJK Unified Ideographs, and 6,582 CJK Extension A ideographs
 - CJK Weight Range: Japanese glyphs interpolate across wght 400-700 (Noto CJK source range); Light=Regular and ExtraBold/Black/ExtraBlack=Bold for CJK shapes
 - Static Fonts: Light through ExtraBlack, both upright and italic
 - Mixed CASL Style: Light/Regular use Linear (traditional), Medium+ use Casual (rounder)

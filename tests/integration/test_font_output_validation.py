@@ -615,6 +615,25 @@ class TestWarpnineMonoVF:
             "GDEF should not have VarStore (incompatible axis count)"
         )
 
+    def test_documented_unicode_coverage(self):
+        """Keep README coverage figures tied to the generated Mono VF."""
+        font_path = DIST_DIR / "WarpnineMono-VF.ttf"
+        if not font_path.exists():
+            pytest.skip("VF not built")
+
+        font = TTFont(font_path)
+        codepoints = set(font.getBestCmap())
+        font.close()
+
+        def count(start, end):
+            return sum(codepoint in codepoints for codepoint in range(start, end + 1))
+
+        assert len(codepoints) == 32_042
+        assert count(0x3040, 0x309F) == 93
+        assert count(0x30A0, 0x30FF) == 96
+        assert count(0x4E00, 0x9FFF) == 20_976
+        assert count(0x3400, 0x4DBF) == 6_582
+
     def test_vf_gsub_no_feature_variations(self):
         """Test VF GSUB table has no FeatureVariations (incompatible axis indices removed)."""
         font_path = DIST_DIR / "WarpnineMono-VF.ttf"
