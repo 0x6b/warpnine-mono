@@ -41,6 +41,11 @@ jobs:
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
 
       - name: Cache Cargo
         uses: Swatinem/rust-cache@v2
@@ -48,8 +53,17 @@ jobs:
       - name: Build CLI
         run: cargo build --release
 
+      - name: Test Rust workspace
+        run: cargo test --workspace --all-targets
+
+      - name: Lint Rust workspace
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
       - name: Build fonts
         run: ./target/release/warpnine-fonts build --version ${{ steps.version.outputs.version }}
+
+      - name: Validate generated fonts
+        run: uv run pytest tests/integration/test_font_output_validation.py -v
 
       - name: Create zip archive
         run: |
