@@ -2519,6 +2519,7 @@ name = "warpnine-font-woff2"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "font-test-data",
  "hb-subset",
  "read-fonts",
  "ttf2woff2",
