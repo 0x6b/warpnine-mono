@@ -72,6 +72,31 @@ jobs:
           cd dist
           zip -r ../warpnine-fonts-${{ steps.version.outputs.version }}.zip *.ttf *.woff2 ../OFL
 
+      - name: Generate release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          CURRENT_TAG="v${VERSION}"
+          PREVIOUS_TAG=$(gh release list --limit 100 --json tagName \
+            --jq ".[] | select(.tagName != \"${CURRENT_TAG}\") | .tagName" \
+            | head -n 1)
+
+          if [ -z "${PREVIOUS_TAG}" ]; then
+            echo "No previous release found; generating notes without a baseline"
+            gh api --method POST "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
+              -f tag_name="${CURRENT_TAG}" \
+              -f target_commitish="${GITHUB_SHA}" \
+              --jq .body > release-notes.md
+          else
+            echo "Generating notes from ${PREVIOUS_TAG} to ${CURRENT_TAG}"
+            gh api --method POST "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
+              -f tag_name="${CURRENT_TAG}" \
+              -f previous_tag_name="${PREVIOUS_TAG}" \
+              -f target_commitish="${GITHUB_SHA}" \
+              --jq .body > release-notes.md
+          fi
+
       - name: Create Release
         uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
         with:
@@ -80,6 +105,6 @@ jobs:
             warpnine-fonts-${{ steps.version.outputs.version }}.zip
             dist/*-VF.ttf
             dist/*-VF.woff2
-          generate_release_notes: true
+          body_path: release-notes.md
           draft: false
           prerelease: false
