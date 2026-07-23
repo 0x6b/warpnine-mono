@@ -9,13 +9,13 @@ use std::{
 
 use read_fonts::{
     FontRef, TableProvider,
-    tables::gsub::Gsub,
+    tables::{cmap::CmapSubtable as ReadCmapSubtable, gsub::Gsub},
     types::{GlyphId16, NameId},
 };
 use write_fonts::{
     BuilderError, FontBuilder,
     tables::{
-        cmap::{Cmap, CmapSubtable, EncodingRecord, PlatformId, SequentialMapGroup},
+        cmap::{Cmap, Cmap4, CmapSubtable, EncodingRecord, PlatformId, SequentialMapGroup},
         name::{Name, NameRecord},
         post::Post,
     },
@@ -262,31 +262,49 @@ impl<'a> FontEditor<'a> {
     pub fn with_remapped_cmap(&self, subs: &GlyphSubstitutions) -> Result<Vec<u8>> {
         let cmap = self.0.cmap().map_err(|_| Error::NoCmap)?;
 
-        let records: Vec<_> = cmap
+        let mut records: Vec<_> = cmap
             .encoding_records()
             .iter()
             .filter_map(|r| r.subtable(cmap.offset_data()).ok().map(|st| (r, st)))
             .map(|(record, subtable)| {
+                // Preserve the original format (format 4 stays format 4, format 12 stays
+                // format 12) and the original platform/encoding IDs. Previously this always
+                // rewrote every subtable as format 12 under (0,4)/(3,10), which silently
+                // dropped any (3,1) Windows-BMP subtable a merged font provided; Windows
+                // requires a 'cmap' subtable matching the 'name' table's (3,1) records or
+                // it refuses to load the font at all.
+                let is_format4 = matches!(subtable, ReadCmapSubtable::Format4(_));
+
+                // read_fonts' format 4 iterator surfaces the mandatory terminating segment
+                // (start=end=0xFFFF, idDelta=1, idRangeOffset=0) as a mapping to glyph 0,
+                // since it only special-cases glyph 0 for the explicit-array lookup path,
+                // not the idDelta path. Glyph 0 is .notdef and was never really "mapped" to
+                // U+FFFF; keeping this phantom entry produces an extra segment that
+                // duplicates the terminator's char-code range, corrupting the rebuilt table.
                 let mut mappings: Vec<_> = subtable
                     .iter()
+                    .filter(|(_, gid)| gid.to_u32() != 0)
                     .map(|(cp, gid)| (cp, subs.remap(gid.to_u32() as u16)))
                     .collect();
                 mappings.sort_by_key(|&(cp, _)| cp);
 
                 let platform_id = PlatformId::new(record.platform_id() as u16);
-                let encoding_id = match record.platform_id() as u16 {
-                    0 => 4,  // Unicode full repertoire
-                    3 => 10, // Windows Unicode full repertoire
-                    _ => record.encoding_id(),
+                let encoding_id = record.encoding_id();
+
+                let new_subtable = if is_format4 {
+                    build_format4_subtable(&mappings)
+                } else {
+                    CmapSubtable::format_12(0, build_groups(&mappings))
                 };
 
-                EncodingRecord::new(
-                    platform_id,
-                    encoding_id,
-                    CmapSubtable::format_12(0, build_groups(&mappings)),
-                )
+                EncodingRecord::new(platform_id, encoding_id, new_subtable)
             })
             .collect();
+
+        // The spec requires encoding records to be sorted by (platform ID, encoding ID);
+        // some Windows cmap parsers rely on this for lookup and treat an unsorted table
+        // as malformed.
+        records.sort();
 
         self.rebuild(|b| b.add_table(&Cmap::new(records)).map(|_| ()))
     }
@@ -390,4 +408,57 @@ fn build_groups(mappings: &[(u32, u16)]) -> Vec<SequentialMapGroup> {
         });
     }
     groups
+}
+
+/// Build a format 4 subtable from BMP (co)domain-preserving `(codepoint, glyph_id)` pairs.
+///
+/// Every segment uses the explicit glyph-id-array encoding rather than `idDelta`, so segment
+/// boundaries only need to track contiguous codepoint runs (not contiguous glyph ids too).
+/// This mirrors `warpnine-font-merger`'s cmap format-4 builder.
+fn build_format4_subtable(mappings: &[(u32, u16)]) -> CmapSubtable {
+    // U+FFFF is excluded even though it's <= 0xFFFF: it collides with the char-code range
+    // of the mandatory terminating segment appended below, and (being a Unicode
+    // noncharacter) is never legitimately mapped by a real font anyway.
+    let bmp: Vec<(u16, u16)> =
+        mappings.iter().filter(|(cp, _)| *cp != 0xFFFF).map(|&(cp, gid)| (cp as u16, gid)).collect();
+
+    let mut segments: Vec<(usize, usize)> = Vec::new();
+    if !bmp.is_empty() {
+        let mut seg_start = 0;
+        for i in 1..bmp.len() {
+            if bmp[i].0 != bmp[i - 1].0 + 1 {
+                segments.push((seg_start, i - 1));
+                seg_start = i;
+            }
+        }
+        segments.push((seg_start, bmp.len() - 1));
+    }
+
+    // Plus the mandatory terminating segment (0xFFFF, 0xFFFF, idDelta=1).
+    let n_segments = segments.len() + 1;
+
+    let mut start_code = Vec::with_capacity(n_segments);
+    let mut end_code = Vec::with_capacity(n_segments);
+    let mut id_delta = Vec::with_capacity(n_segments);
+    let mut id_range_offsets = Vec::with_capacity(n_segments);
+    let mut glyph_id_array = Vec::new();
+
+    for (i, &(start_ix, end_ix)) in segments.iter().enumerate() {
+        start_code.push(bmp[start_ix].0);
+        end_code.push(bmp[end_ix].0);
+        id_delta.push(0i16);
+
+        let n_following_segments = n_segments - i;
+        let id_range_offset = (n_following_segments + glyph_id_array.len()) * 2;
+        id_range_offsets.push(id_range_offset as u16);
+
+        glyph_id_array.extend(bmp[start_ix..=end_ix].iter().map(|(_, gid)| *gid));
+    }
+
+    start_code.push(0xFFFF);
+    end_code.push(0xFFFF);
+    id_delta.push(1);
+    id_range_offsets.push(0);
+
+    CmapSubtable::Format4(Cmap4::new(0, end_code, start_code, id_delta, id_range_offsets, glyph_id_array))
 }

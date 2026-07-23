@@ -9,8 +9,8 @@ use read_fonts::{
     tables::cmap::{Cmap as ReadCmap, CmapSubtable, PlatformId},
 };
 use write_fonts::tables::cmap::{
-    Cmap, Cmap12, CmapSubtable as WriteCmapSubtable, EncodingRecord, PlatformId as WritePlatformId,
-    SequentialMapGroup,
+    Cmap, Cmap4, Cmap12, CmapSubtable as WriteCmapSubtable, EncodingRecord,
+    PlatformId as WritePlatformId, SequentialMapGroup,
 };
 
 use crate::{
@@ -62,7 +62,19 @@ pub fn merge_cmap(
         }
     }
 
-    // Build the cmap using format 12 only to avoid format 4 overflow with large character sets
+    // Emit both a format 4 (BMP) and a format 12 (full repertoire) subtable. Windows
+    // requires the platform/encoding IDs referenced by the 'name' table (3, 1) to have a
+    // matching 'cmap' subtable, or it refuses to load the font entirely ("not a valid font
+    // file"); a format-12-only cmap satisfies macOS/CoreText but not Windows. See
+    // https://learn.microsoft.com/en-us/typography/opentype/spec/recom#cmap-table
+    //
+    // write-fonts' own format-4 builder (used by `Cmap::from_mappings`) panics on this font:
+    // it tries to encode large char-to-glyph deltas (common in a merged CJK glyph order,
+    // where glyph IDs can sit tens of thousands of positions away from their codepoints)
+    // into `idDelta`, which is a 16-bit field, and its overflow fallback
+    // (`delta.rem_euclid(0x10000).try_into().unwrap()`) itself panics for delta magnitudes
+    // above i16::MAX. We build format 4 by hand below, always using the explicit
+    // glyph-id-array form (never `idDelta`), which sidesteps that bug entirely.
     let mut mappings: Vec<(u32, u32)> = codepoint_to_glyph
         .iter()
         .filter_map(|(cp, name)| {
@@ -73,43 +85,120 @@ pub fn merge_cmap(
 
     mappings.sort_by_key(|(cp, _)| *cp);
 
-    let cmap = build_cmap_format12(&mappings);
+    let encoding_records = build_encoding_records(&mappings);
 
-    Ok((cmap, duplicate_info))
+    Ok((Cmap::new(encoding_records), duplicate_info))
 }
 
-/// Build a cmap table using only format 12 subtables.
-///
-/// This avoids the format 4 overflow issue that occurs with large character sets
-/// (format 4 uses u16 for segment counts and can overflow with >32k entries).
-fn build_cmap_format12(mappings: &[(u32, u32)]) -> Cmap {
-    // Build sequential map groups by finding contiguous runs
-    let groups = build_sequential_groups(mappings);
+/// Build the full set of 'cmap' encoding records: a format 4 subtable for the BMP range
+/// (platform 0 encoding 3, platform 3 encoding 1) and a format 12 subtable for the full
+/// Unicode repertoire (platform 0 encoding 4, platform 3 encoding 10).
+fn build_encoding_records(mappings: &[(u32, u32)]) -> Vec<EncodingRecord> {
+    let mut records = Vec::new();
 
-    let cmap12 = Cmap12 { language: 0, groups };
-
-    // Create encoding records for Unicode platform (required for cross-platform support)
-    // Platform 0 (Unicode), Encoding 4 (Unicode full repertoire)
-    // Platform 3 (Windows), Encoding 10 (Unicode full repertoire)
-    let encoding_records = vec![
-        EncodingRecord::new(
+    if let Some(cmap4) = build_format4(mappings) {
+        records.push(EncodingRecord::new(
             WritePlatformId::Unicode,
-            4, // Full Unicode
-            WriteCmapSubtable::Format12(cmap12.clone()),
-        ),
-        EncodingRecord::new(
+            3, // Unicode BMP
+            WriteCmapSubtable::Format4(cmap4.clone()),
+        ));
+        records.push(EncodingRecord::new(
             WritePlatformId::Windows,
-            10, // Full Unicode
-            WriteCmapSubtable::Format12(cmap12),
-        ),
-    ];
+            1, // Windows Unicode BMP
+            WriteCmapSubtable::Format4(cmap4),
+        ));
+    }
 
-    Cmap::new(encoding_records)
+    let groups = build_sequential_groups(mappings);
+    let cmap12 = Cmap12 { language: 0, groups };
+    records.push(EncodingRecord::new(
+        WritePlatformId::Unicode,
+        4, // Unicode full repertoire
+        WriteCmapSubtable::Format12(cmap12.clone()),
+    ));
+    records.push(EncodingRecord::new(
+        WritePlatformId::Windows,
+        10, // Windows full repertoire
+        WriteCmapSubtable::Format12(cmap12),
+    ));
+
+    // The spec requires encoding records to be sorted by (platform ID, encoding ID);
+    // some Windows cmap parsers rely on this for lookup and treat an unsorted table
+    // as malformed.
+    records.sort();
+    records
+}
+
+/// Build a format 4 subtable covering the BMP-range (<= 0xFFFF) prefix of `mappings`.
+///
+/// Returns `None` if no codepoints are in the BMP. Every segment uses the explicit
+/// glyph-id-array encoding rather than `idDelta`, so segment boundaries only need to
+/// track contiguous codepoint runs (not contiguous glyph ids too). The per-char array
+/// entry costs 2 bytes; for a font with tens of thousands of BMP characters that's tens
+/// of KB against a multi-MB font, an acceptable trade for avoiding delta-overflow entirely.
+fn build_format4(mappings: &[(u32, u32)]) -> Option<Cmap4> {
+    // U+FFFF is excluded even though it's <= 0xFFFF: it collides with the char-code range
+    // of the mandatory terminating segment appended below, and (being a Unicode
+    // noncharacter) is never legitimately mapped by a real font anyway.
+    let bmp: Vec<(u16, u16)> = mappings
+        .iter()
+        .take_while(|(cp, _)| *cp <= 0xFFFF)
+        .filter(|(cp, _)| *cp != 0xFFFF)
+        .map(|&(cp, gid)| (cp as u16, gid as u16))
+        .collect();
+
+    if bmp.is_empty() {
+        return None;
+    }
+
+    // Segment boundaries: contiguous runs of consecutive codepoints.
+    let mut segments: Vec<(usize, usize)> = Vec::new();
+    let mut seg_start = 0;
+    for i in 1..bmp.len() {
+        if bmp[i].0 != bmp[i - 1].0 + 1 {
+            segments.push((seg_start, i - 1));
+            seg_start = i;
+        }
+    }
+    segments.push((seg_start, bmp.len() - 1));
+
+    // Plus the mandatory terminating segment (0xFFFF, 0xFFFF, idDelta=1).
+    let n_segments = segments.len() + 1;
+
+    let mut start_code = Vec::with_capacity(n_segments);
+    let mut end_code = Vec::with_capacity(n_segments);
+    let mut id_delta = Vec::with_capacity(n_segments);
+    let mut id_range_offsets = Vec::with_capacity(n_segments);
+    let mut glyph_id_array = Vec::new();
+
+    for (i, &(start_ix, end_ix)) in segments.iter().enumerate() {
+        start_code.push(bmp[start_ix].0);
+        end_code.push(bmp[end_ix].0);
+        id_delta.push(0i16);
+
+        // Byte offset from this segment's own idRangeOffset slot to its glyph ids,
+        // mirroring the sfnt memory layout (remaining idRangeOffset entries, then
+        // the glyph ids already emitted by earlier segments).
+        let n_following_segments = n_segments - i;
+        let id_range_offset = (n_following_segments + glyph_id_array.len()) * 2;
+        id_range_offsets.push(id_range_offset as u16);
+
+        glyph_id_array.extend(bmp[start_ix..=end_ix].iter().map(|(_, gid)| *gid));
+    }
+
+    // Mandatory terminating segment.
+    start_code.push(0xFFFF);
+    end_code.push(0xFFFF);
+    id_delta.push(1);
+    id_range_offsets.push(0);
+
+    Some(Cmap4::new(0, end_code, start_code, id_delta, id_range_offsets, glyph_id_array))
 }
 
 /// Build sequential map groups from sorted (codepoint, glyph_id) pairs.
 ///
-/// Groups consecutive codepoints that map to consecutive glyph IDs.
+/// Groups consecutive codepoints that map to consecutive glyph IDs, as required by
+/// format 12's `SequentialMapGroup` (glyphId = startGlyphID + (charCode - startCharCode)).
 fn build_sequential_groups(mappings: &[(u32, u32)]) -> Vec<SequentialMapGroup> {
     if mappings.is_empty() {
         return Vec::new();
