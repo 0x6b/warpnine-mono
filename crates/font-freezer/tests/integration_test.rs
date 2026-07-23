@@ -99,19 +99,24 @@ fn test_freeze_pnum_opensans() {
 }
 
 #[test]
-fn test_freeze_normalizes_format12_encoding_ids() {
+fn test_freeze_preserves_format4_platform_encoding_ids() {
+    // The source font's only 'cmap' subtable is (platform 3, encoding 1), format 4 -- the
+    // Windows-required Unicode BMP subtable. Freezing must not rewrite it into format 12
+    // under (3, 10): Windows refuses to load a font whose 'cmap' has no subtable matching
+    // the 'name' table's (3, 1) platform/encoding, so silently converting a valid (3, 1)
+    // format 4 subtable away breaks the font on Windows.
     let font_data = include_bytes!("fixtures/OpenSans-Bold.subset.ttf");
     let frozen = freeze_features(font_data, ["pnum"]).unwrap();
     let font = FontRef::new(&frozen).unwrap();
     let cmap = font.cmap().unwrap();
 
-    for record in cmap.encoding_records() {
-        match record.platform_id() as u16 {
-            0 => assert_eq!(record.encoding_id(), 4),
-            3 => assert_eq!(record.encoding_id(), 10),
-            _ => {}
-        }
-    }
+    let records: Vec<_> = cmap.encoding_records().iter().collect();
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].platform_id() as u16, 3);
+    assert_eq!(records[0].encoding_id(), 1);
+
+    let subtable = records[0].subtable(cmap.offset_data()).unwrap();
+    assert!(matches!(subtable, read_fonts::tables::cmap::CmapSubtable::Format4(_)));
 }
 
 #[test]
