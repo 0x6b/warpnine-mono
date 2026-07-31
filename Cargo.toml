@@ -20,10 +20,10 @@ license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
 # Font libraries
-read-fonts = "0.39"
-write-fonts = "0.48"
-skrifa = "0.42"
-font-types = "0.11"
+read-fonts = "0.42"
+write-fonts = "0.51"
+skrifa = "0.45"
+font-types = "0.12"
 hb-subset = { version = "0.3", features = ["bundled"] }
 
 # CLI
@@ -41,14 +41,14 @@ chrono = "0.4"
 indexmap = "2.14"
 kurbo = "0.13"
 glob = "0.3"
-sha2 = "0.10"
+sha2 = "0.11"
 
 # Network/IO
 reqwest = { version = "0.13", features = ["blocking"] }
 zip = "8.6"
 
 # Testing
-font-test-data = "0.6"
+font-test-data = "0.8"
 
 # Workspace crates
 warpnine-core = { path = "crates/core" }

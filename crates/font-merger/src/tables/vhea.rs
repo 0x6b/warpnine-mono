@@ -29,6 +29,7 @@ pub fn merge_vhea(fonts: &[FontRef], num_v_metrics: u16) -> Result<Option<Vhea>>
     let y_max_extents: Vec<i16> = tables.iter().map(|t| t.y_max_extent().to_i16()).collect();
 
     Ok(Some(Vhea {
+        version: first(&tables.iter().map(vhea::Vhea::version).collect::<Vec<_>>())?,
         ascender: FWord::new(max(&ascenders)?),
         descender: FWord::new(min(&descenders)?),
         line_gap: FWord::new(max(&line_gaps)?),
