@@ -68,6 +68,7 @@ fn scale_simple_glyph(glyph: &glyf::SimpleGlyph, scale_x: f32) -> SimpleGlyph {
         bbox,
         contours,
         instructions: glyph.instructions().to_vec(),
+        overlaps: glyph.has_overlapping_contours(),
     }
 }
 

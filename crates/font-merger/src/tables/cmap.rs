@@ -8,9 +8,10 @@ use read_fonts::{
     FontRef, TableProvider,
     tables::cmap::{Cmap as ReadCmap, CmapSubtable, PlatformId},
 };
+use warpnine_font_ops::build_cmap4;
 use write_fonts::tables::cmap::{
-    Cmap, Cmap4, Cmap12, CmapSubtable as WriteCmapSubtable, EncodingRecord,
-    PlatformId as WritePlatformId, SequentialMapGroup,
+    Cmap, Cmap12, CmapSubtable as WriteCmapSubtable, EncodingRecord, PlatformId as WritePlatformId,
+    SequentialMapGroup,
 };
 
 use crate::{
@@ -68,13 +69,8 @@ pub fn merge_cmap(
     // file"); a format-12-only cmap satisfies macOS/CoreText but not Windows. See
     // https://learn.microsoft.com/en-us/typography/opentype/spec/recom#cmap-table
     //
-    // write-fonts' own format-4 builder (used by `Cmap::from_mappings`) panics on this font:
-    // it tries to encode large char-to-glyph deltas (common in a merged CJK glyph order,
-    // where glyph IDs can sit tens of thousands of positions away from their codepoints)
-    // into `idDelta`, which is a 16-bit field, and its overflow fallback
-    // (`delta.rem_euclid(0x10000).try_into().unwrap()`) itself panics for delta magnitudes
-    // above i16::MAX. We build format 4 by hand below, always using the explicit
-    // glyph-id-array form (never `idDelta`), which sidesteps that bug entirely.
+    // The shared builder combines compact idDelta segments with explicit glyph arrays
+    // and safely omits format 4 if the result cannot fit its 16-bit length field.
     let mut mappings: Vec<(u32, u32)> = codepoint_to_glyph
         .iter()
         .filter_map(|(cp, name)| {
@@ -95,8 +91,12 @@ pub fn merge_cmap(
 /// Unicode repertoire (platform 0 encoding 4, platform 3 encoding 10).
 fn build_encoding_records(mappings: &[(u32, u32)]) -> Vec<EncodingRecord> {
     let mut records = Vec::new();
+    let bmp_mappings: Vec<_> = mappings
+        .iter()
+        .map(|&(codepoint, glyph_id)| (codepoint, glyph_id as u16))
+        .collect();
 
-    if let Some(cmap4) = build_format4(mappings) {
+    if let Some(cmap4) = build_cmap4(&bmp_mappings) {
         records.push(EncodingRecord::new(
             WritePlatformId::Unicode,
             3, // Unicode BMP
@@ -127,72 +127,6 @@ fn build_encoding_records(mappings: &[(u32, u32)]) -> Vec<EncodingRecord> {
     // as malformed.
     records.sort();
     records
-}
-
-/// Build a format 4 subtable covering the BMP-range (<= 0xFFFF) prefix of `mappings`.
-///
-/// Returns `None` if no codepoints are in the BMP. Every segment uses the explicit
-/// glyph-id-array encoding rather than `idDelta`, so segment boundaries only need to
-/// track contiguous codepoint runs (not contiguous glyph ids too). The per-char array
-/// entry costs 2 bytes; for a font with tens of thousands of BMP characters that's tens
-/// of KB against a multi-MB font, an acceptable trade for avoiding delta-overflow entirely.
-fn build_format4(mappings: &[(u32, u32)]) -> Option<Cmap4> {
-    // U+FFFF is excluded even though it's <= 0xFFFF: it collides with the char-code range
-    // of the mandatory terminating segment appended below, and (being a Unicode
-    // noncharacter) is never legitimately mapped by a real font anyway.
-    let bmp: Vec<(u16, u16)> = mappings
-        .iter()
-        .take_while(|(cp, _)| *cp <= 0xFFFF)
-        .filter(|(cp, _)| *cp != 0xFFFF)
-        .map(|&(cp, gid)| (cp as u16, gid as u16))
-        .collect();
-
-    if bmp.is_empty() {
-        return None;
-    }
-
-    // Segment boundaries: contiguous runs of consecutive codepoints.
-    let mut segments: Vec<(usize, usize)> = Vec::new();
-    let mut seg_start = 0;
-    for i in 1..bmp.len() {
-        if bmp[i].0 != bmp[i - 1].0 + 1 {
-            segments.push((seg_start, i - 1));
-            seg_start = i;
-        }
-    }
-    segments.push((seg_start, bmp.len() - 1));
-
-    // Plus the mandatory terminating segment (0xFFFF, 0xFFFF, idDelta=1).
-    let n_segments = segments.len() + 1;
-
-    let mut start_code = Vec::with_capacity(n_segments);
-    let mut end_code = Vec::with_capacity(n_segments);
-    let mut id_delta = Vec::with_capacity(n_segments);
-    let mut id_range_offsets = Vec::with_capacity(n_segments);
-    let mut glyph_id_array = Vec::new();
-
-    for (i, &(start_ix, end_ix)) in segments.iter().enumerate() {
-        start_code.push(bmp[start_ix].0);
-        end_code.push(bmp[end_ix].0);
-        id_delta.push(0i16);
-
-        // Byte offset from this segment's own idRangeOffset slot to its glyph ids,
-        // mirroring the sfnt memory layout (remaining idRangeOffset entries, then
-        // the glyph ids already emitted by earlier segments).
-        let n_following_segments = n_segments - i;
-        let id_range_offset = (n_following_segments + glyph_id_array.len()) * 2;
-        id_range_offsets.push(id_range_offset as u16);
-
-        glyph_id_array.extend(bmp[start_ix..=end_ix].iter().map(|(_, gid)| *gid));
-    }
-
-    // Mandatory terminating segment.
-    start_code.push(0xFFFF);
-    end_code.push(0xFFFF);
-    id_delta.push(1);
-    id_range_offsets.push(0);
-
-    Some(Cmap4::new(0, end_code, start_code, id_delta, id_range_offsets, glyph_id_array))
 }
 
 /// Build sequential map groups from sorted (codepoint, glyph_id) pairs.

@@ -379,6 +379,7 @@ fn convert_gsub_lookup(
             }
             Some(WriteLookup::Reverse(Lookup::new(flag, subtables)))
         }
+        SubstitutionSubtables::EmptyExtension => None,
     }
 }
 
@@ -781,6 +782,7 @@ fn convert_gpos_lookup(
             }
             Some(PositionLookup::ChainContextual(Lookup::new(flag, subtables)))
         }
+        PositionSubtables::EmptyExtension => None,
     }
 }
 

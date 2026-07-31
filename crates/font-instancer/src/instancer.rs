@@ -408,6 +408,7 @@ fn apply_deltas_to_simple_glyph(
         bbox: Bbox::default(),
         contours,
         instructions: simple.instructions().to_vec(),
+        overlaps: simple.has_overlapping_contours(),
     };
     glyph.recompute_bounding_box();
 

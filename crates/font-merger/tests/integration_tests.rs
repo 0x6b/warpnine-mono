@@ -65,6 +65,7 @@ fn make_test_font_with_bounds(
             bbox: Bbox { x_min, y_min, x_max, y_max },
             contours: vec![],
             instructions: vec![],
+            overlaps: false,
         };
         let _ = glyf_builder.add_glyph(&Glyph::Simple(simple));
     }
@@ -394,6 +395,7 @@ fn test_merge_os2_unicode_ranges() {
             bbox: Bbox { x_min: 0, y_min: 0, x_max: 500, y_max: 700 },
             contours: vec![],
             instructions: vec![],
+            overlaps: false,
         }));
         let (glyf, loca, loca_format) = glyf_builder.build();
 
@@ -489,6 +491,7 @@ fn test_merge_os2_unicode_ranges() {
             bbox: Bbox { x_min: 0, y_min: 0, x_max: 500, y_max: 700 },
             contours: vec![],
             instructions: vec![],
+            overlaps: false,
         }));
         let (glyf, loca, loca_format) = glyf_builder.build();
 
@@ -800,6 +803,7 @@ fn test_hinting_stripped_from_non_first_fonts() {
             bbox: Bbox { x_min: 0, y_min: 0, x_max: 500, y_max: 700 },
             contours: vec![contour.clone()],
             instructions: vec![],
+            overlaps: false,
         };
         let _ = glyf_builder.add_glyph(&Glyph::Simple(notdef));
 
@@ -808,6 +812,7 @@ fn test_hinting_stripped_from_non_first_fonts() {
             bbox: Bbox { x_min: 100, y_min: 100, x_max: 400, y_max: 600 },
             contours: vec![contour],
             instructions,
+            overlaps: false,
         };
         let _ = glyf_builder.add_glyph(&Glyph::Simple(glyph));
 

@@ -1,4 +1,5 @@
 use std::{
+    fmt::Write as _,
     fs::{create_dir_all, remove_file, rename, write},
     io::{Cursor, Read},
     iter::once,
@@ -132,7 +133,7 @@ fn download_jetbrains_mono(output_dir: &Path) -> Result<()> {
 }
 
 fn write_verified(target: &Path, bytes: &[u8], expected_sha256: &str) -> Result<()> {
-    let actual = format!("{:x}", Sha256::digest(bytes));
+    let actual = sha256_hex(bytes);
     if !actual.eq_ignore_ascii_case(expected_sha256) {
         bail!(
             "SHA-256 mismatch for {}: expected {expected_sha256}, got {actual}",
@@ -153,6 +154,15 @@ fn write_verified(target: &Path, bytes: &[u8], expected_sha256: &str) -> Result<
         });
     }
     Ok(())
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    let digest = Sha256::digest(bytes);
+    let mut hex = String::with_capacity(digest.len() * 2);
+    for byte in digest {
+        write!(&mut hex, "{byte:02x}").expect("writing to a String cannot fail");
+    }
+    hex
 }
 
 /// Download task type for parallel processing.
@@ -221,7 +231,7 @@ mod tests {
         create_dir_all(&dir).unwrap();
         let target = dir.join("source.ttf");
         let bytes = b"font data";
-        let digest = format!("{:x}", Sha256::digest(bytes));
+        let digest = sha256_hex(bytes);
 
         write_verified(&target, bytes, &digest).unwrap();
         assert_eq!(read(&target).unwrap(), bytes);

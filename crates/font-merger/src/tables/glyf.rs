@@ -177,7 +177,12 @@ fn convert_glyph(
             // Strip hinting instructions from non-first fonts
             let instructions = if strip_hinting { vec![] } else { simple.instructions().to_vec() };
 
-            let simple_glyph = SimpleGlyph { bbox, contours, instructions };
+            let simple_glyph = SimpleGlyph {
+                bbox,
+                contours,
+                instructions,
+                overlaps: simple.has_overlapping_contours(),
+            };
 
             Glyph::Simple(simple_glyph)
         }
