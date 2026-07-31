@@ -44,8 +44,10 @@ const SKIP_TABLES: &[Tag] = &[
     Tag::new(b"vmtx"),
 ];
 
-/// Starting name ID for instance names (256+ are user-defined)
-const INSTANCE_NAME_ID_START: u16 = 256;
+/// User-defined name ID ranges used by generated variation tables.
+const AXIS_NAME_ID_START: u16 = 256;
+const INSTANCE_NAME_ID_START: u16 = 300;
+const INSTANCE_PS_NAME_ID_START: u16 = 400;
 
 /// Build a variable font from a designspace.
 ///
@@ -197,7 +199,7 @@ fn build_fvar(designspace: &DesignSpace) -> Result<Fvar> {
                 default_value: Fixed::from_f64(f64::from(axis.default)),
                 max_value: Fixed::from_f64(f64::from(axis.maximum)),
                 flags: 0u16,
-                axis_name_id: NameId::new(256 + idx as u16),
+                axis_name_id: NameId::new(AXIS_NAME_ID_START + idx as u16),
             }
         })
         .collect();
@@ -241,7 +243,9 @@ fn build_name(default_font: &FontRef, designspace: &DesignSpace) -> Result<Name>
 
     let mut new_records: Vec<NameRecord> = Vec::new();
 
-    // Name IDs used for instances (256-271 for 16 instances)
+    let axis_name_ids: HashSet<u16> =
+        (AXIS_NAME_ID_START..AXIS_NAME_ID_START + designspace.axes.len() as u16).collect();
+
     let instance_name_ids: HashSet<u16> = (INSTANCE_NAME_ID_START
         ..INSTANCE_NAME_ID_START + designspace.instances.len() as u16)
         .collect();
@@ -262,7 +266,8 @@ fn build_name(default_font: &FontRef, designspace: &DesignSpace) -> Result<Name>
 
         // Skip name IDs that will be used for instances, STAT, or instance
         // PostScript names.
-        if instance_name_ids.contains(&name_id)
+        if axis_name_ids.contains(&name_id)
+            || instance_name_ids.contains(&name_id)
             || stat_name_ids.contains(&name_id)
             || ps_name_ids.contains(&name_id)
         {
@@ -281,6 +286,19 @@ fn build_name(default_font: &FontRef, designspace: &DesignSpace) -> Result<Name>
             NameId::new(name_id),
             string.into(),
         ));
+    }
+
+    // Add variation-axis names referenced by fvar and STAT.
+    for (idx, axis) in designspace.axes.iter().enumerate() {
+        let name_id = AXIS_NAME_ID_START + idx as u16;
+        new_records.push(NameRecord::new(
+            3,
+            1,
+            0x409,
+            NameId::new(name_id),
+            axis.name.clone().into(),
+        ));
+        new_records.push(NameRecord::new(1, 0, 0, NameId::new(name_id), axis.name.clone().into()));
     }
 
     // Add instance names for both platforms (Windows and Mac)
@@ -334,20 +352,23 @@ fn build_name(default_font: &FontRef, designspace: &DesignSpace) -> Result<Name>
         new_records.push(NameRecord::new(1, 0, 0, NameId::new(name_id), name.to_string().into()));
     }
 
-    // Italic values (name IDs 290-291)
-    let stat_italic_names = [(290, "Upright"), (291, "Italic")];
-
-    for (name_id, name) in stat_italic_names {
-        // Windows
-        new_records.push(NameRecord::new(
-            3,
-            1,
-            0x409,
-            NameId::new(name_id),
-            name.to_string().into(),
-        ));
-        // Mac
-        new_records.push(NameRecord::new(1, 0, 0, NameId::new(name_id), name.to_string().into()));
+    if designspace.axes.iter().any(|axis| axis.tag == "ital") {
+        for (name_id, name) in [(290, "Upright"), (291, "Italic")] {
+            new_records.push(NameRecord::new(
+                3,
+                1,
+                0x409,
+                NameId::new(name_id),
+                name.to_string().into(),
+            ));
+            new_records.push(NameRecord::new(
+                1,
+                0,
+                0,
+                NameId::new(name_id),
+                name.to_string().into(),
+            ));
+        }
     }
 
     // Sort records by (platformID, encodingID, languageID, nameID)
@@ -804,19 +825,18 @@ const WEIGHT_STOPS: [(f64, u16); 8] = [
     (1000.0, 287),
 ];
 
-/// fvar instance PostScript name IDs start here (one per instance).
-const INSTANCE_PS_NAME_ID_START: u16 = 300;
-
 /// Weight stops that fall within the designspace `wght` axis range.
 ///
 /// Sans (`wght` max 900) drops ExtraBlack (1000); Mono (max 1000) keeps it.
-/// Falls back to all stops if there is no `wght` axis.
 fn weight_stops_in_range(designspace: &DesignSpace) -> Vec<(f64, &'static str, u16)> {
-    let (min, max) = designspace
+    let Some((min, max)) = designspace
         .axes
         .iter()
         .find(|a| a.tag == "wght")
-        .map_or((f64::MIN, f64::MAX), |a| (f64::from(a.minimum), f64::from(a.maximum)));
+        .map(|a| (f64::from(a.minimum), f64::from(a.maximum)))
+    else {
+        return Vec::new();
+    };
 
     WEIGHT_STOPS
         .into_iter()
@@ -839,50 +859,55 @@ fn build_stat(designspace: &DesignSpace) -> Result<Stat> {
             for (i, b) in axis.tag.bytes().take(4).enumerate() {
                 tag_bytes[i] = b;
             }
-            // Use name IDs 256+ for axis names (matching fvar)
-            AxisRecord::new(Tag::new(&tag_bytes), NameId::new(256 + idx as u16), idx as u16)
+            AxisRecord::new(
+                Tag::new(&tag_bytes),
+                NameId::new(AXIS_NAME_ID_START + idx as u16),
+                idx as u16,
+            )
         })
         .collect();
 
     // Build axis values for each named instance/weight
     let mut axis_values: Vec<AxisValue> = Vec::new();
 
-    // For weight axis: add a value for each weight stop within the axis range.
-    for (value, _name, name_id) in weight_stops_in_range(designspace) {
-        let mut flags = AxisValueTableFlags::empty();
-        // Mark Regular (400) as the elidable default
-        if (value - 400.0).abs() < 0.1 {
-            flags |= AxisValueTableFlags::ELIDABLE_AXIS_VALUE_NAME;
+    if let Some(weight_axis_index) = designspace.axes.iter().position(|axis| axis.tag == "wght") {
+        for (value, _name, name_id) in weight_stops_in_range(designspace) {
+            let mut flags = AxisValueTableFlags::empty();
+            if (value - 400.0).abs() < 0.1 {
+                flags |= AxisValueTableFlags::ELIDABLE_AXIS_VALUE_NAME;
+            }
+            axis_values.push(AxisValue::format_1(
+                weight_axis_index as u16,
+                flags,
+                NameId::new(name_id),
+                Fixed::from_f64(value),
+            ));
         }
-        axis_values.push(AxisValue::format_1(
-            0, // wght is axis index 0
-            flags,
-            NameId::new(name_id),
-            Fixed::from_f64(value),
-        ));
     }
 
-    // For italic axis: add values for upright and italic
-    let italic_values: [(f64, &str, u16, bool); 2] = [
-        (0.0, "Upright", 290, true), // Upright is elidable default
-        (1.0, "Italic", 291, false),
-    ];
-
-    for (value, _name, name_id, is_default) in italic_values {
-        let mut flags = AxisValueTableFlags::empty();
-        if is_default {
-            flags |= AxisValueTableFlags::ELIDABLE_AXIS_VALUE_NAME;
+    if let Some(italic_axis_index) = designspace.axes.iter().position(|axis| axis.tag == "ital") {
+        for (value, name_id, is_default) in [(0.0, 290, true), (1.0, 291, false)] {
+            let mut flags = AxisValueTableFlags::empty();
+            if is_default {
+                flags |= AxisValueTableFlags::ELIDABLE_AXIS_VALUE_NAME;
+            }
+            axis_values.push(AxisValue::format_1(
+                italic_axis_index as u16,
+                flags,
+                NameId::new(name_id),
+                Fixed::from_f64(value),
+            ));
         }
-        axis_values.push(AxisValue::format_1(
-            1, // ital is axis index 1
-            flags,
-            NameId::new(name_id),
-            Fixed::from_f64(value),
-        ));
     }
 
-    // Use "Regular" (name ID 281) as the elided fallback name
-    Ok(Stat::new(axis_records, axis_values, NameId::new(281)))
+    let fallback_name_id = if designspace.axes.iter().any(|axis| axis.tag == "wght") {
+        281 // Regular
+    } else if designspace.axes.iter().any(|axis| axis.tag == "ital") {
+        290 // Upright
+    } else {
+        2 // Default font subfamily name
+    };
+    Ok(Stat::new(axis_records, axis_values, NameId::new(fallback_name_id)))
 }
 
 /// Build a GDEF table without VarStore.
@@ -951,6 +976,18 @@ mod tests {
     use super::*;
     use crate::designspace::Axis;
 
+    fn stat_axis_indices(stat: &Stat) -> Vec<u16> {
+        stat.offset_to_axis_values
+            .as_ref()
+            .expect("STAT should contain axis values")
+            .iter()
+            .map(|value| match value.as_ref() {
+                AxisValue::Format1(value) => value.axis_index,
+                _ => panic!("expected format 1 axis value"),
+            })
+            .collect()
+    }
+
     fn ds(wght_max: f32) -> DesignSpace {
         DesignSpace::new(
             vec![
@@ -977,5 +1014,31 @@ mod tests {
         let names: Vec<&str> = stops.iter().map(|(_, n, _)| *n).collect();
         assert_eq!(names, ["Light", "Regular", "Medium", "SemiBold", "Bold", "ExtraBold", "Black"]);
         assert!(stops.iter().all(|(v, _, _)| *v <= 900.0));
+    }
+
+    #[test]
+    fn stat_does_not_reference_a_missing_italic_axis() {
+        let designspace =
+            DesignSpace::new(vec![Axis::new("wght", "Weight", 300.0, 400.0, 900.0)], vec![]);
+        let stat = build_stat(&designspace).unwrap();
+
+        assert_eq!(stat.design_axes.len(), 1);
+        assert!(stat_axis_indices(&stat).iter().all(|&index| index == 0));
+    }
+
+    #[test]
+    fn stat_uses_actual_axis_order() {
+        let designspace = DesignSpace::new(
+            vec![
+                Axis::new("ital", "Italic", 0.0, 0.0, 1.0),
+                Axis::new("wght", "Weight", 300.0, 400.0, 900.0),
+            ],
+            vec![],
+        );
+        let indices = stat_axis_indices(&build_stat(&designspace).unwrap());
+
+        assert!(indices.contains(&0));
+        assert!(indices.contains(&1));
+        assert!(indices.iter().all(|&index| index < 2));
     }
 }

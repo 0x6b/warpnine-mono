@@ -22,6 +22,7 @@ read-fonts.workspace = true
 write-fonts.workspace = true
 thiserror.workspace = true
 clap = { workspace = true, optional = true }
+warpnine-font-ops.workspace = true
 
 [features]
 default = ["cli"]

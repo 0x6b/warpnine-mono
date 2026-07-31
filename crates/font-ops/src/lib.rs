@@ -11,11 +11,152 @@ use write_fonts::{
     FontBuilder,
     from_obj::ToOwnedTable,
     tables::{
+        cmap::Cmap4,
         head::{Head, MacStyle},
         name::{Name, NameRecord},
         os2::{Os2, SelectionFlags},
     },
 };
+
+const CMAP4_HEADER_LEN: usize = 16;
+const CMAP4_SEGMENT_LEN: usize = 8;
+const CMAP4_MAX_LEN: usize = u16::MAX as usize;
+
+#[derive(Clone, Copy)]
+enum Cmap4SegmentKind {
+    Delta,
+    Explicit,
+}
+
+#[derive(Clone, Copy)]
+struct Cmap4Segment {
+    start: usize,
+    end: usize,
+    kind: Cmap4SegmentKind,
+}
+
+/// Build the smallest format 4 cmap representation for sorted BMP mappings.
+///
+/// Sequential codepoint-to-glyph runs use the compact `idDelta` representation;
+/// irregular runs use `glyphIdArray`. Returns `None` when there are no BMP mappings
+/// or when even the smallest representation exceeds format 4's 16-bit length limit.
+pub fn build_cmap4(mappings: &[(u32, u16)]) -> Option<Cmap4> {
+    let bmp: Vec<(u16, u16)> = mappings
+        .iter()
+        .take_while(|(codepoint, _)| *codepoint <= 0xFFFF)
+        .filter(|(codepoint, _)| *codepoint != 0xFFFF)
+        .map(|&(codepoint, glyph_id)| (codepoint as u16, glyph_id))
+        .collect();
+
+    if bmp.is_empty() {
+        return None;
+    }
+
+    let mut segments = Vec::new();
+    let mut run_start = 0;
+    for index in 1..=bmp.len() {
+        if index == bmp.len() || bmp[index].0 != bmp[index - 1].0 + 1 {
+            segments.extend(plan_cmap4_run(&bmp[run_start..index]).into_iter().map(|segment| {
+                Cmap4Segment {
+                    start: segment.start + run_start,
+                    end: segment.end + run_start,
+                    kind: segment.kind,
+                }
+            }));
+            run_start = index;
+        }
+    }
+
+    // Include the mandatory U+FFFF terminating segment.
+    let segment_count = segments.len() + 1;
+    let explicit_glyph_count: usize = segments
+        .iter()
+        .filter(|segment| matches!(segment.kind, Cmap4SegmentKind::Explicit))
+        .map(|segment| segment.end - segment.start)
+        .sum();
+    let table_len = CMAP4_HEADER_LEN + CMAP4_SEGMENT_LEN * segment_count + 2 * explicit_glyph_count;
+    if table_len > CMAP4_MAX_LEN {
+        return None;
+    }
+
+    let mut start_code = Vec::with_capacity(segment_count);
+    let mut end_code = Vec::with_capacity(segment_count);
+    let mut id_delta = Vec::with_capacity(segment_count);
+    let mut id_range_offsets = Vec::with_capacity(segment_count);
+    let mut glyph_id_array = Vec::with_capacity(explicit_glyph_count);
+
+    for (index, segment) in segments.iter().enumerate() {
+        let &(first_codepoint, first_glyph_id) = &bmp[segment.start];
+        start_code.push(first_codepoint);
+        end_code.push(bmp[segment.end - 1].0);
+
+        match segment.kind {
+            Cmap4SegmentKind::Delta => {
+                id_delta.push(first_glyph_id.wrapping_sub(first_codepoint) as i16);
+                id_range_offsets.push(0);
+            }
+            Cmap4SegmentKind::Explicit => {
+                id_delta.push(0);
+                let following_offset_words = segment_count - index;
+                let range_offset = (following_offset_words + glyph_id_array.len()) * 2;
+                id_range_offsets.push(range_offset as u16);
+                glyph_id_array
+                    .extend(bmp[segment.start..segment.end].iter().map(|&(_, glyph_id)| glyph_id));
+            }
+        }
+    }
+
+    start_code.push(0xFFFF);
+    end_code.push(0xFFFF);
+    id_delta.push(1);
+    id_range_offsets.push(0);
+
+    Some(Cmap4::new(0, end_code, start_code, id_delta, id_range_offsets, glyph_id_array))
+}
+
+/// Find a minimum-size partition for one contiguous codepoint run.
+fn plan_cmap4_run(run: &[(u16, u16)]) -> Vec<Cmap4Segment> {
+    let mut costs = vec![usize::MAX; run.len() + 1];
+    let mut previous = vec![(0, Cmap4SegmentKind::Explicit); run.len() + 1];
+    costs[0] = 0;
+
+    // An explicit segment ending at `end` costs:
+    // costs[start] + 8 + 2 * (end - start).
+    let mut best_explicit = (0isize, 0usize);
+    let mut best_delta = (0usize, 0usize);
+
+    for end in 1..=run.len() {
+        let starts_new_delta_run = end > 1 && run[end - 2].1.checked_add(1) != Some(run[end - 1].1);
+        if starts_new_delta_run || costs[end - 1] < best_delta.0 {
+            best_delta = (costs[end - 1], end - 1);
+        }
+
+        let explicit_cost = (CMAP4_SEGMENT_LEN + 2 * end) as isize + best_explicit.0;
+        let delta_cost = best_delta.0 + CMAP4_SEGMENT_LEN;
+        if delta_cost <= explicit_cost as usize {
+            costs[end] = delta_cost;
+            previous[end] = (best_delta.1, Cmap4SegmentKind::Delta);
+        } else {
+            costs[end] = explicit_cost as usize;
+            previous[end] = (best_explicit.1, Cmap4SegmentKind::Explicit);
+        }
+
+        let explicit_base = costs[end] as isize - (2 * end) as isize;
+        if explicit_base < best_explicit.0 {
+            best_explicit = (explicit_base, end);
+        }
+    }
+
+    let mut segments = Vec::new();
+    let mut end = run.len();
+    while end > 0 {
+        let (start, kind) = previous[end];
+        segments.push(Cmap4Segment { start, end, kind });
+        end = start;
+    }
+    segments.reverse();
+    segments
+}
 
 /// Rewrite font data by applying a transformation function.
 ///
@@ -359,6 +500,52 @@ pub fn copy_gsub_without_feature_variations(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use write_fonts::dump_table;
+
+    #[test]
+    fn cmap4_compacts_large_fragmented_sequential_mappings() {
+        let mut mappings = Vec::new();
+        let mut codepoint = 0x100u32;
+        let mut glyph_id = 1u16;
+        for _ in 0..4_000 {
+            for _ in 0..5 {
+                mappings.push((codepoint, glyph_id));
+                codepoint += 1;
+                glyph_id += 1;
+            }
+            codepoint += 1;
+        }
+
+        // Encoding every mapping explicitly would require 72,024 bytes.
+        let cmap4 = build_cmap4(&mappings).expect("sequential runs should fit using idDelta");
+        let bytes = dump_table(&cmap4).expect("format 4 serialization should not overflow");
+        assert!(bytes.len() <= u16::MAX as usize);
+        assert!(cmap4.glyph_id_array.is_empty());
+    }
+
+    #[test]
+    fn cmap4_omits_an_irreducibly_oversized_subtable() {
+        let mut mappings = Vec::new();
+        let mut codepoint = 0x100u32;
+        for index in 0..8_000u32 {
+            mappings.push((codepoint, ((index * 7_919) % 60_000 + 1) as u16));
+            mappings.push((codepoint + 1, ((index * 10_007 + 17) % 60_000 + 1) as u16));
+            codepoint += 3;
+        }
+
+        assert!(build_cmap4(&mappings).is_none());
+    }
+
+    #[test]
+    fn cmap4_id_delta_wraps_modulo_65536() {
+        let mappings = [(0xE000, 1), (0xE001, 2), (0xE002, 3)];
+        let cmap4 = build_cmap4(&mappings).expect("mapping should fit");
+
+        assert_eq!(cmap4.start_code, [0xE000, 0xFFFF]);
+        assert_eq!(cmap4.end_code, [0xE002, 0xFFFF]);
+        assert_eq!(cmap4.id_delta[0] as u16, 1u16.wrapping_sub(0xE000));
+        assert_eq!(cmap4.id_range_offsets, [0, 0]);
+    }
 
     #[test]
     fn weight_names() {

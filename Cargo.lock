@@ -2441,6 +2441,7 @@ dependencies = [
  "clap",
  "read-fonts",
  "thiserror 2.0.18",
+ "warpnine-font-ops",
  "write-fonts",
 ]
 
@@ -2468,6 +2469,7 @@ dependencies = [
  "log",
  "read-fonts",
  "thiserror 2.0.18",
+ "warpnine-font-ops",
  "write-fonts",
 ]
 
